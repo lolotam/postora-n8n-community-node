@@ -111,8 +111,10 @@ export class Postora implements INodeType {
         displayName: 'Social Accounts',
         name: 'socialAccounts',
         type: 'multiOptions',
+        noDataExpression: true,
         typeOptions: {
           loadOptionsMethod: 'getAccounts',
+          loadOptionsDependsOn: ['platform'],
         },
         default: [],
         required: true,
@@ -130,12 +132,33 @@ export class Postora implements INodeType {
         description: 'The post caption / text content',
       },
       {
+        displayName: 'Media Source',
+        name: 'mediaSource',
+        type: 'options',
+        options: [
+          { name: 'None', value: 'none' },
+          { name: 'URL', value: 'url' },
+          { name: 'Binary Data', value: 'binary' },
+        ],
+        default: 'none',
+        displayOptions: { show: { resource: ['post'], operation: ['create'] } },
+        description: 'How to attach media to the post',
+      },
+      {
         displayName: 'Media URLs',
         name: 'mediaUrls',
         type: 'string',
         default: '',
-        displayOptions: { show: { resource: ['post'], operation: ['create'] } },
+        displayOptions: { show: { resource: ['post'], operation: ['create'], mediaSource: ['url'] } },
         description: 'Comma-separated media URLs (images or videos). The API will download and attach them to the post.',
+      },
+      {
+        displayName: 'Binary Property',
+        name: 'mediaBinaryProperty',
+        type: 'string',
+        default: 'data',
+        displayOptions: { show: { resource: ['post'], operation: ['create'], mediaSource: ['binary'] } },
+        description: 'Name of the binary property containing the media file(s). For multiple files, use comma-separated names (e.g., data,data1,data2).',
       },
       {
         displayName: 'Schedule At',
@@ -358,8 +381,11 @@ export class Postora implements INodeType {
           const platform = this.getNodeParameter('platform', i) as string;
           const caption = this.getNodeParameter('caption', i) as string;
           const socialAccounts = this.getNodeParameter('socialAccounts', i) as string[];
-          const mediaUrls = (this.getNodeParameter('mediaUrls', i, '') as string)
-            .split(',').map(s => s.trim()).filter(Boolean);
+          const mediaSource = this.getNodeParameter('mediaSource', i, 'none') as string;
+          const mediaUrls = mediaSource === 'url'
+            ? (this.getNodeParameter('mediaUrls', i, '') as string)
+                .split(',').map(s => s.trim()).filter(Boolean)
+            : [];
           const scheduledAt = this.getNodeParameter('scheduledAt', i, '') as string;
           const additionalOptions = this.getNodeParameter('additionalOptions', i, {}) as Record<string, any>;
 
@@ -370,6 +396,20 @@ export class Postora implements INodeType {
 
           if (socialAccounts.length) body.account_ids = socialAccounts;
           if (mediaUrls.length) body.media_urls = mediaUrls;
+
+          // Binary data → base64 (supports multiple comma-separated property names)
+          if (mediaSource === 'binary') {
+            const binaryProp = this.getNodeParameter('mediaBinaryProperty', i, 'data') as string;
+            const binaryProps = binaryProp.split(',').map(p => p.trim()).filter(Boolean);
+            const base64Files: string[] = [];
+            for (const prop of binaryProps) {
+              const bd = this.helpers.assertBinaryData(i, prop);
+              const buf = await this.helpers.getBinaryDataBuffer(i, prop);
+              base64Files.push(`data:${bd.mimeType};base64,${buf.toString('base64')}`);
+            }
+            body.media_base64 = base64Files;
+          }
+
           if (scheduledAt) body.scheduled_at = scheduledAt;
 
           // Platform-specific metadata
