@@ -32,6 +32,12 @@ class PostoraApi {
                 },
             },
         };
+        this.test = {
+            request: {
+                baseURL: '={{$credentials?.baseUrl}}',
+                url: '/api/v1/accounts',
+            },
+        };
     }
 }
 exports.PostoraApi = PostoraApi;

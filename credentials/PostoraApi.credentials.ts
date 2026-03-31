@@ -1,5 +1,6 @@
 import {
   IAuthenticateGeneric,
+  ICredentialTestRequest,
   ICredentialType,
   INodeProperties,
 } from 'n8n-workflow';
@@ -34,6 +35,13 @@ export class PostoraApi implements ICredentialType {
       headers: {
         'x-api-key': '={{$credentials.apiKey}}',
       },
+    },
+  };
+
+  test: ICredentialTestRequest = {
+    request: {
+      baseURL: '={{$credentials?.baseUrl}}',
+      url: '/api/v1/accounts',
     },
   };
 }
