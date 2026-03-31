@@ -1,4 +1,5 @@
 import {
+  IAllExecuteFunctions,
   IExecuteFunctions,
   ILoadOptionsFunctions,
   INodeExecutionData,
@@ -327,47 +328,36 @@ export class Postora implements INodeType {
   methods = {
     loadOptions: {
       async getAccounts(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-        try {
-          const credentials = await this.getCredentials('postoraApi');
-          const baseUrl = credentials.baseUrl as string;
-          const apiKey = credentials.apiKey as string;
+        const credentials = await this.getCredentials('postoraApi');
+        const baseUrl = credentials.baseUrl as string;
+        const platform = this.getCurrentNodeParameter('platform') as string;
 
-          const platform = this.getCurrentNodeParameter('platform') as string;
+        let url = `${baseUrl}/api/v1/accounts`;
+        if (platform) {
+          url += `?platform=${encodeURIComponent(platform)}`;
+        }
 
-          console.log(`[Postora DEBUG] getAccounts called — platform: "${platform}"`);
-
-          let url = `${baseUrl}/api/v1/accounts`;
-          if (platform) {
-            url += `?platform=${encodeURIComponent(platform)}`;
-          }
-
-          console.log(`[Postora DEBUG] Requesting URL: ${url}`);
-
-          const response = await this.helpers.httpRequest({
+        const response = await this.helpers.httpRequestWithAuthentication.call(
+          this as unknown as IAllExecuteFunctions,
+          'postoraApi',
+          {
             method: 'GET',
             url,
-            headers: { 'x-api-key': apiKey },
             json: true,
-          });
+          },
+        );
 
-          console.log(`[Postora DEBUG] Response: ${JSON.stringify(response)?.substring(0, 500)}`);
-
-          if (!response?.accounts || !Array.isArray(response.accounts)) {
-            return [];
-          }
-
-          return response.accounts.map((account: any, index: number) => {
-            const displayName = account.name || account.platform_username || 'Unknown';
-            return {
-              name: `${index + 1}. ${displayName}`,
-              value: account.id,
-            };
-          });
-        } catch (error: any) {
-          console.log(`[Postora ERROR] getAccounts failed: ${error?.message}`);
-          console.log(`[Postora ERROR] Stack: ${error?.stack}`);
-          throw new Error(`Failed to load accounts: ${error?.message || 'Unknown error'}`);
+        if (!response?.accounts || !Array.isArray(response.accounts)) {
+          return [];
         }
+
+        return response.accounts.map((account: any, index: number) => {
+          const displayName = account.name || account.platform_username || 'Unknown';
+          return {
+            name: `${index + 1}. ${displayName}`,
+            value: account.id,
+          };
+        });
       },
     },
   };
@@ -386,12 +376,15 @@ export class Postora implements INodeType {
 
         // ── Account → List ──
         if (resource === 'account' && operation === 'list') {
-          responseData = await this.helpers.httpRequest({
-            method: 'GET',
-            url: `${baseUrl}/api/v1/accounts`,
-            headers: { 'x-api-key': credentials.apiKey as string },
-            json: true,
-          });
+          responseData = await this.helpers.httpRequestWithAuthentication.call(
+            this as unknown as IAllExecuteFunctions,
+            'postoraApi',
+            {
+              method: 'GET',
+              url: `${baseUrl}/api/v1/accounts`,
+              json: true,
+            },
+          );
         }
 
         // ── Post → Create ──
@@ -450,27 +443,33 @@ export class Postora implements INodeType {
           if (additionalOptions.redditSubreddit) body.reddit_subreddit = additionalOptions.redditSubreddit;
           if (additionalOptions.redditTitle) body.reddit_title = additionalOptions.redditTitle;
 
-          responseData = await this.helpers.httpRequest({
-            method: 'POST',
-            url: `${baseUrl}/api/v1/post`,
-            headers: {
-              'x-api-key': credentials.apiKey as string,
-              'Content-Type': 'application/json',
+          responseData = await this.helpers.httpRequestWithAuthentication.call(
+            this as unknown as IAllExecuteFunctions,
+            'postoraApi',
+            {
+              method: 'POST',
+              url: `${baseUrl}/api/v1/post`,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body,
+              json: true,
             },
-            body,
-            json: true,
-          });
+          );
         }
 
         // ── Post → Get Status ──
         else if (resource === 'post' && operation === 'getStatus') {
           const postId = this.getNodeParameter('postId', i) as string;
-          responseData = await this.helpers.httpRequest({
-            method: 'GET',
-            url: `${baseUrl}/api/v1/post/${postId}`,
-            headers: { 'x-api-key': credentials.apiKey as string },
-            json: true,
-          });
+          responseData = await this.helpers.httpRequestWithAuthentication.call(
+            this as unknown as IAllExecuteFunctions,
+            'postoraApi',
+            {
+              method: 'GET',
+              url: `${baseUrl}/api/v1/post/${postId}`,
+              json: true,
+            },
+          );
         }
 
         // ── Post → List ──
@@ -480,12 +479,15 @@ export class Postora implements INodeType {
           let url = `${baseUrl}/api/v1/posts?limit=${limit}`;
           if (statusFilter) url += `&status=${statusFilter}`;
 
-          responseData = await this.helpers.httpRequest({
-            method: 'GET',
-            url,
-            headers: { 'x-api-key': credentials.apiKey as string },
-            json: true,
-          });
+          responseData = await this.helpers.httpRequestWithAuthentication.call(
+            this as unknown as IAllExecuteFunctions,
+            'postoraApi',
+            {
+              method: 'GET',
+              url,
+              json: true,
+            },
+          );
         }
 
         // ── Media → Upload ──
@@ -504,15 +506,18 @@ export class Postora implements INodeType {
           const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
           const multipartBody = Buffer.concat([header, buffer, footer]);
 
-          responseData = await this.helpers.httpRequest({
-            method: 'POST',
-            url: `${baseUrl}/api/v1/media/upload`,
-            headers: {
-              'x-api-key': credentials.apiKey as string,
-              'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          responseData = await this.helpers.httpRequestWithAuthentication.call(
+            this as unknown as IAllExecuteFunctions,
+            'postoraApi',
+            {
+              method: 'POST',
+              url: `${baseUrl}/api/v1/media/upload`,
+              headers: {
+                'Content-Type': `multipart/form-data; boundary=${boundary}`,
+              },
+              body: multipartBody,
             },
-            body: multipartBody,
-          });
+          );
 
           // Parse JSON response if it comes back as a string
           if (typeof responseData === 'string') {

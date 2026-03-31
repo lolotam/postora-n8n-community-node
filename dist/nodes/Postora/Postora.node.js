@@ -311,40 +311,28 @@ class Postora {
         this.methods = {
             loadOptions: {
                 async getAccounts() {
-                    try {
-                        const credentials = await this.getCredentials('postoraApi');
-                        const baseUrl = credentials.baseUrl;
-                        const apiKey = credentials.apiKey;
-                        const platform = this.getCurrentNodeParameter('platform');
-                        console.log(`[Postora DEBUG] getAccounts called — platform: "${platform}"`);
-                        let url = `${baseUrl}/api/v1/accounts`;
-                        if (platform) {
-                            url += `?platform=${encodeURIComponent(platform)}`;
-                        }
-                        console.log(`[Postora DEBUG] Requesting URL: ${url}`);
-                        const response = await this.helpers.httpRequest({
-                            method: 'GET',
-                            url,
-                            headers: { 'x-api-key': apiKey },
-                            json: true,
-                        });
-                        console.log(`[Postora DEBUG] Response: ${JSON.stringify(response)?.substring(0, 500)}`);
-                        if (!response?.accounts || !Array.isArray(response.accounts)) {
-                            return [];
-                        }
-                        return response.accounts.map((account, index) => {
-                            const displayName = account.name || account.platform_username || 'Unknown';
-                            return {
-                                name: `${index + 1}. ${displayName}`,
-                                value: account.id,
-                            };
-                        });
+                    const credentials = await this.getCredentials('postoraApi');
+                    const baseUrl = credentials.baseUrl;
+                    const platform = this.getCurrentNodeParameter('platform');
+                    let url = `${baseUrl}/api/v1/accounts`;
+                    if (platform) {
+                        url += `?platform=${encodeURIComponent(platform)}`;
                     }
-                    catch (error) {
-                        console.log(`[Postora ERROR] getAccounts failed: ${error?.message}`);
-                        console.log(`[Postora ERROR] Stack: ${error?.stack}`);
-                        throw new Error(`Failed to load accounts: ${error?.message || 'Unknown error'}`);
+                    const response = await this.helpers.httpRequestWithAuthentication.call(this, 'postoraApi', {
+                        method: 'GET',
+                        url,
+                        json: true,
+                    });
+                    if (!response?.accounts || !Array.isArray(response.accounts)) {
+                        return [];
                     }
+                    return response.accounts.map((account, index) => {
+                        const displayName = account.name || account.platform_username || 'Unknown';
+                        return {
+                            name: `${index + 1}. ${displayName}`,
+                            value: account.id,
+                        };
+                    });
                 },
             },
         };
@@ -361,10 +349,9 @@ class Postora {
                 let responseData;
                 // ── Account → List ──
                 if (resource === 'account' && operation === 'list') {
-                    responseData = await this.helpers.httpRequest({
+                    responseData = await this.helpers.httpRequestWithAuthentication.call(this, 'postoraApi', {
                         method: 'GET',
                         url: `${baseUrl}/api/v1/accounts`,
-                        headers: { 'x-api-key': credentials.apiKey },
                         json: true,
                     });
                 }
@@ -429,11 +416,10 @@ class Postora {
                         body.reddit_subreddit = additionalOptions.redditSubreddit;
                     if (additionalOptions.redditTitle)
                         body.reddit_title = additionalOptions.redditTitle;
-                    responseData = await this.helpers.httpRequest({
+                    responseData = await this.helpers.httpRequestWithAuthentication.call(this, 'postoraApi', {
                         method: 'POST',
                         url: `${baseUrl}/api/v1/post`,
                         headers: {
-                            'x-api-key': credentials.apiKey,
                             'Content-Type': 'application/json',
                         },
                         body,
@@ -443,10 +429,9 @@ class Postora {
                 // ── Post → Get Status ──
                 else if (resource === 'post' && operation === 'getStatus') {
                     const postId = this.getNodeParameter('postId', i);
-                    responseData = await this.helpers.httpRequest({
+                    responseData = await this.helpers.httpRequestWithAuthentication.call(this, 'postoraApi', {
                         method: 'GET',
                         url: `${baseUrl}/api/v1/post/${postId}`,
-                        headers: { 'x-api-key': credentials.apiKey },
                         json: true,
                     });
                 }
@@ -457,10 +442,9 @@ class Postora {
                     let url = `${baseUrl}/api/v1/posts?limit=${limit}`;
                     if (statusFilter)
                         url += `&status=${statusFilter}`;
-                    responseData = await this.helpers.httpRequest({
+                    responseData = await this.helpers.httpRequestWithAuthentication.call(this, 'postoraApi', {
                         method: 'GET',
                         url,
-                        headers: { 'x-api-key': credentials.apiKey },
                         json: true,
                     });
                 }
@@ -475,11 +459,10 @@ class Postora {
                     const header = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName}"\r\nContent-Type: ${mimeType}\r\n\r\n`);
                     const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
                     const multipartBody = Buffer.concat([header, buffer, footer]);
-                    responseData = await this.helpers.httpRequest({
+                    responseData = await this.helpers.httpRequestWithAuthentication.call(this, 'postoraApi', {
                         method: 'POST',
                         url: `${baseUrl}/api/v1/media/upload`,
                         headers: {
-                            'x-api-key': credentials.apiKey,
                             'Content-Type': `multipart/form-data; boundary=${boundary}`,
                         },
                         body: multipartBody,
