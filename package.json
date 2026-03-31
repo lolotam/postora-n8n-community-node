@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-postora",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "n8n community node for Postora — publish to social media platforms (Instagram, Facebook, TikTok, YouTube, Pinterest, Twitter/X, LinkedIn, Threads, Bluesky, Reddit)",
   "keywords": [
     "n8n-community-node-package",
@@ -13,7 +13,8 @@
   "homepage": "https://postora.cloud",
   "author": {
     "name": "Postora",
-    "url": "https://postora.cloud"
+    "url": "https://postora.cloud",
+    "email": "postora.cloud@gmail.com"
   },
   "repository": {
     "type": "git",
