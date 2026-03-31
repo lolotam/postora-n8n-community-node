@@ -11,14 +11,14 @@ import {
 const platformOptions = [
   { name: '1. Facebook', value: 'facebook' },
   { name: '2. Instagram', value: 'instagram' },
-  { name: '3. TikTok', value: 'tiktok' },
-  { name: '4. Twitter / X', value: 'twitter' },
-  { name: '5. LinkedIn', value: 'linkedin' },
-  { name: '6. Pinterest', value: 'pinterest' },
-  { name: '7. YouTube', value: 'youtube' },
-  { name: '8. Threads', value: 'threads' },
-  { name: '9. Bluesky', value: 'bluesky' },
-  { name: '10. Reddit', value: 'reddit' },
+  { name: '3. Threads', value: 'threads' },
+  { name: '4. YouTube (Beta)', value: 'youtube' },
+  { name: '5. Pinterest', value: 'pinterest' },
+  { name: '6. LinkedIn (Personal Only)', value: 'linkedin' },
+  { name: '7. Bluesky', value: 'bluesky' },
+  // { name: '8. X / Twitter (Coming Soon)', value: 'twitter' },
+  // { name: '9. TikTok (Coming Soon)', value: 'tiktok' },
+  // { name: '10. Reddit (Coming Soon)', value: 'reddit' },
 ];
 
 
@@ -397,6 +397,11 @@ export class Postora implements INodeType {
         // ── Post → Create ──
         else if (resource === 'post' && operation === 'create') {
           const platform = this.getNodeParameter('platform', i) as string;
+
+          if (['twitter', 'tiktok', 'reddit'].includes(platform)) {
+            throw new Error(`The selected platform (${platform}) is coming soon and is not yet available for publishing.`);
+          }
+
           const caption = this.getNodeParameter('caption', i) as string;
           const socialAccounts = this.getNodeParameter(`socialAccounts_${platform}`, i) as string[];
           const mediaSource = this.getNodeParameter('mediaSource', i, 'none') as string;

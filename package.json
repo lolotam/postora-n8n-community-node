@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-postora",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "n8n community node for Postora — publish to social media platforms (Instagram, Facebook, TikTok, YouTube, Pinterest, Twitter/X, LinkedIn, Threads, Bluesky, Reddit)",
   "keywords": [
     "n8n-community-node-package",
@@ -39,6 +39,7 @@
     ]
   },
   "devDependencies": {
+    "@n8n/node-cli": "^0.23.1",
     "@types/node": "^22.0.0",
     "gulp": "^4.0.2",
     "n8n-workflow": "^1.0.0",
