@@ -5,7 +5,22 @@ import {
   INodePropertyOptions,
   INodeType,
   INodeTypeDescription,
+  INodeProperties,
 } from 'n8n-workflow';
+
+const platformOptions = [
+  { name: '1. Facebook', value: 'facebook' },
+  { name: '2. Instagram', value: 'instagram' },
+  { name: '3. TikTok', value: 'tiktok' },
+  { name: '4. Twitter / X', value: 'twitter' },
+  { name: '5. LinkedIn', value: 'linkedin' },
+  { name: '6. Pinterest', value: 'pinterest' },
+  { name: '7. YouTube', value: 'youtube' },
+  { name: '8. Threads', value: 'threads' },
+  { name: '9. Bluesky', value: 'bluesky' },
+  { name: '10. Reddit', value: 'reddit' },
+];
+
 
 export class Postora implements INodeType {
   description: INodeTypeDescription = {
@@ -90,37 +105,26 @@ export class Postora implements INodeType {
         displayName: 'Platform',
         name: 'platform',
         type: 'options',
-        options: [
-          { name: 'Facebook', value: 'facebook' },
-          { name: 'Instagram', value: 'instagram' },
-          { name: 'TikTok', value: 'tiktok' },
-          { name: 'Twitter / X', value: 'twitter' },
-          { name: 'LinkedIn', value: 'linkedin' },
-          { name: 'Pinterest', value: 'pinterest' },
-          { name: 'YouTube', value: 'youtube' },
-          { name: 'Threads', value: 'threads' },
-          { name: 'Bluesky', value: 'bluesky' },
-          { name: 'Reddit', value: 'reddit' },
-        ],
+        noDataExpression: true,
+        options: platformOptions,
         default: 'facebook',
         required: true,
         displayOptions: { show: { resource: ['post'], operation: ['create'] } },
         description: 'Target platform for the post',
       },
-      {
+      ...platformOptions.map((p) => ({
         displayName: 'Social Accounts',
-        name: 'socialAccounts',
+        name: `socialAccounts_${p.value}`,
         type: 'multiOptions',
         noDataExpression: true,
         typeOptions: {
           loadOptionsMethod: 'getAccounts',
-          loadOptionsDependsOn: ['platform'],
         },
         default: [],
         required: true,
-        displayOptions: { show: { resource: ['post'], operation: ['create'] } },
-        description: 'Select accounts to post to (filtered by chosen platform)',
-      },
+        displayOptions: { show: { resource: ['post'], operation: ['create'], platform: [p.value] } },
+        description: `Select ${p.name.replace(/^\d+\.\s*/, '')} accounts to post to`,
+      } as INodeProperties)),
       {
         displayName: 'Caption',
         name: 'caption',
@@ -185,8 +189,8 @@ export class Postora implements INodeType {
             description: 'Title for YouTube videos',
           },
           {
-            displayName: 'YouTube Privacy',
-            name: 'youtubePrivacy',
+            displayName: 'YouTube Visibility',
+            name: 'youtubeVisibility',
             type: 'options',
             options: [
               { name: 'Public', value: 'public' },
@@ -194,7 +198,7 @@ export class Postora implements INodeType {
               { name: 'Private', value: 'private' },
             ],
             default: 'public',
-            description: 'YouTube video privacy setting',
+            description: 'YouTube video visibility setting',
           },
           {
             displayName: 'YouTube Category',
@@ -323,33 +327,47 @@ export class Postora implements INodeType {
   methods = {
     loadOptions: {
       async getAccounts(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-        const credentials = await this.getCredentials('postoraApi');
-        const baseUrl = credentials.baseUrl as string;
-        const apiKey = credentials.apiKey as string;
+        try {
+          const credentials = await this.getCredentials('postoraApi');
+          const baseUrl = credentials.baseUrl as string;
+          const apiKey = credentials.apiKey as string;
 
-        // Get the currently selected platform
-        const platform = this.getCurrentNodeParameter('platform') as string;
+          const platform = this.getCurrentNodeParameter('platform') as string;
 
-        let url = `${baseUrl}/api/v1/accounts`;
-        if (platform) {
-          url += `?platform=${encodeURIComponent(platform)}`;
+          console.log(`[Postora DEBUG] getAccounts called — platform: "${platform}"`);
+
+          let url = `${baseUrl}/api/v1/accounts`;
+          if (platform) {
+            url += `?platform=${encodeURIComponent(platform)}`;
+          }
+
+          console.log(`[Postora DEBUG] Requesting URL: ${url}`);
+
+          const response = await this.helpers.httpRequest({
+            method: 'GET',
+            url,
+            headers: { 'x-api-key': apiKey },
+            json: true,
+          });
+
+          console.log(`[Postora DEBUG] Response: ${JSON.stringify(response)?.substring(0, 500)}`);
+
+          if (!response?.accounts || !Array.isArray(response.accounts)) {
+            return [];
+          }
+
+          return response.accounts.map((account: any, index: number) => {
+            const displayName = account.name || account.platform_username || 'Unknown';
+            return {
+              name: `${index + 1}. ${displayName}`,
+              value: account.id,
+            };
+          });
+        } catch (error: any) {
+          console.log(`[Postora ERROR] getAccounts failed: ${error?.message}`);
+          console.log(`[Postora ERROR] Stack: ${error?.stack}`);
+          throw new Error(`Failed to load accounts: ${error?.message || 'Unknown error'}`);
         }
-
-        const response = await this.helpers.httpRequest({
-          method: 'GET',
-          url,
-          headers: { 'x-api-key': apiKey },
-          json: true,
-        });
-
-        if (!response?.accounts || !Array.isArray(response.accounts)) {
-          return [];
-        }
-
-        return response.accounts.map((account: any) => ({
-          name: `${account.platform_username || 'Unknown'}=${account.platform_user_id || account.id}`,
-          value: account.id,
-        }));
       },
     },
   };
@@ -380,7 +398,7 @@ export class Postora implements INodeType {
         else if (resource === 'post' && operation === 'create') {
           const platform = this.getNodeParameter('platform', i) as string;
           const caption = this.getNodeParameter('caption', i) as string;
-          const socialAccounts = this.getNodeParameter('socialAccounts', i) as string[];
+          const socialAccounts = this.getNodeParameter(`socialAccounts_${platform}`, i) as string[];
           const mediaSource = this.getNodeParameter('mediaSource', i, 'none') as string;
           const mediaUrls = mediaSource === 'url'
             ? (this.getNodeParameter('mediaUrls', i, '') as string)
@@ -413,8 +431,10 @@ export class Postora implements INodeType {
           if (scheduledAt) body.scheduled_at = scheduledAt;
 
           // Platform-specific metadata
+          if (platform === 'youtube') {
+            body.youtube_visibility = additionalOptions.youtubeVisibility || 'public';
+          }
           if (additionalOptions.youtubeTitle) body.youtube_title = additionalOptions.youtubeTitle;
-          if (additionalOptions.youtubePrivacy) body.youtube_privacy = additionalOptions.youtubePrivacy;
           if (additionalOptions.youtubeCategory) body.youtube_category = additionalOptions.youtubeCategory;
           if (additionalOptions.tiktokPrivacy) body.tiktok_privacy = additionalOptions.tiktokPrivacy;
           if (additionalOptions.tiktokAllowComments !== undefined) body.tiktok_allow_comments = additionalOptions.tiktokAllowComments;
