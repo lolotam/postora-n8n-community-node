@@ -406,21 +406,36 @@ export class Postora implements INodeType {
           const socialAccounts = this.getNodeParameter(`socialAccounts_${platform}`, i) as string[];
           // Normalize mediaSource — handle n8n expression mode returning raw strings
           let mediaSource = this.getNodeParameter("mediaSource", i, "none") as string;
+          const rawMediaSource = mediaSource; // Keep original before normalization
           mediaSource = mediaSource?.toLowerCase?.().trim() || "none";
+
+          // Smart detection: if expression mode returned an actual URL instead of "url"/"binary"/"none",
+          // treat it as a direct media URL
+          let expressionModeUrls: string[] = [];
           if (!["url", "binary", "none"].includes(mediaSource)) {
-            mediaSource = "none"; // Fall back safely if expression mode returns unexpected value
+            const possibleUrls = rawMediaSource.split(",").map(s => s.trim()).filter(s => {
+              try { new URL(s); return true; } catch { return false; }
+            });
+            if (possibleUrls.length > 0) {
+              mediaSource = "url";
+              expressionModeUrls = possibleUrls;
+            } else {
+              mediaSource = "none";
+            }
           }
 
           const mediaUrls =
-            mediaSource === "url"
-              ? (this.getNodeParameter("mediaUrls", i, "") as string)
+            expressionModeUrls.length > 0
+              ? expressionModeUrls
+              : mediaSource === "url"
+                ? (this.getNodeParameter("mediaUrls", i, "") as string)
                   .split(",")
                   .map((s) => s.trim())
                   .filter((s) => {
                     if (!s) return false;
                     try { new URL(s); return true; } catch { return false; }
                   })
-              : [];
+                : [];
 
           if (mediaSource === "url" && mediaUrls.length === 0) {
             throw new Error(
