@@ -305,7 +305,7 @@ class Postora {
                     default: "data",
                     required: true,
                     displayOptions: { show: { resource: ["media"], operation: ["upload"] } },
-                    description: "Name of the binary property containing the file to upload",
+                    description: "Name of the binary property containing the file to upload. For multiple files, use comma-separated names (e.g. 'IMAGE, VIDEO_')",
                 },
             ],
         };
@@ -498,31 +498,45 @@ class Postora {
                 // ── Media → Upload ──
                 else if (resource === "media" && operation === "upload") {
                     const binaryPropertyName = this.getNodeParameter("binaryPropertyName", i);
-                    const binaryData = this.helpers.assertBinaryData(i, binaryPropertyName);
-                    const buffer = await this.helpers.getBinaryDataBuffer(i, binaryPropertyName);
-                    const boundary = "----n8nFormBoundary" + Math.random().toString(36).substring(2);
-                    const fileName = binaryData.fileName || "upload";
-                    const mimeType = binaryData.mimeType || "application/octet-stream";
-                    const header = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName}"\r\nContent-Type: ${mimeType}\r\n\r\n`);
-                    const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
-                    const multipartBody = Buffer.concat([header, buffer, footer]);
-                    responseData = await this.helpers.httpRequestWithAuthentication.call(this, "postoraApi", {
-                        method: "POST",
-                        url: `${baseUrl}/api/v1/upload-media`,
-                        headers: {
-                            "Content-Type": `multipart/form-data; boundary=${boundary}`,
-                        },
-                        body: multipartBody,
-                    });
-                    // Parse JSON response if it comes back as a string
-                    if (typeof responseData === "string") {
+                    const propertyNames = binaryPropertyName.split(',').map((name) => name.trim()).filter((name) => name.length > 0);
+                    const uploadResults = [];
+                    const uploadErrors = [];
+                    for (const prop of propertyNames) {
                         try {
-                            responseData = JSON.parse(responseData);
+                            const binaryData = this.helpers.assertBinaryData(i, prop);
+                            const buffer = await this.helpers.getBinaryDataBuffer(i, prop);
+                            const boundary = "----n8nFormBoundary" + Math.random().toString(36).substring(2);
+                            const fileName = binaryData.fileName || "upload";
+                            const mimeType = binaryData.mimeType || "application/octet-stream";
+                            const header = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName}"\r\nContent-Type: ${mimeType}\r\n\r\n`);
+                            const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
+                            const multipartBody = Buffer.concat([header, buffer, footer]);
+                            let result = await this.helpers.httpRequestWithAuthentication.call(this, "postoraApi", {
+                                method: "POST",
+                                url: `${baseUrl}/api/v1/upload-media`,
+                                headers: {
+                                    "Content-Type": `multipart/form-data; boundary=${boundary}`,
+                                },
+                                body: multipartBody,
+                            });
+                            if (typeof result === "string") {
+                                try {
+                                    result = JSON.parse(result);
+                                }
+                                catch (_) { /* keep as-is */ }
+                            }
+                            uploadResults.push({ field: prop, success: true, ...result });
                         }
-                        catch (_) {
-                            /* keep as-is */
+                        catch (err) {
+                            uploadErrors.push({ field: prop, success: false, error: err.message });
                         }
                     }
+                    responseData = {
+                        total: propertyNames.length,
+                        uploaded: uploadResults.length,
+                        failed: uploadErrors.length,
+                        results: [...uploadResults, ...uploadErrors],
+                    };
                 }
                 if (Array.isArray(responseData)) {
                     returnData.push(...responseData.map((item) => ({ json: item })));

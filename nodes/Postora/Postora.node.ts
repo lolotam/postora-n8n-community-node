@@ -325,7 +325,7 @@ export class Postora implements INodeType {
         default: "data",
         required: true,
         displayOptions: { show: { resource: ["media"], operation: ["upload"] } },
-        description: "Name of the binary property containing the file to upload",
+        description: "Name of the binary property containing the file to upload. For multiple files, use comma-separated names (e.g. 'IMAGE, VIDEO_')",
       },
     ],
   };
@@ -429,12 +429,12 @@ export class Postora implements INodeType {
               ? expressionModeUrls
               : mediaSource === "url"
                 ? (this.getNodeParameter("mediaUrls", i, "") as string)
-                  .split(",")
-                  .map((s) => s.trim())
-                  .filter((s) => {
-                    if (!s) return false;
-                    try { new URL(s); return true; } catch { return false; }
-                  })
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter((s) => {
+                      if (!s) return false;
+                      try { new URL(s); return true; } catch { return false; }
+                    })
                 : [];
 
           if (mediaSource === "url" && mediaUrls.length === 0) {
@@ -541,40 +541,55 @@ export class Postora implements INodeType {
         // ── Media → Upload ──
         else if (resource === "media" && operation === "upload") {
           const binaryPropertyName = this.getNodeParameter("binaryPropertyName", i) as string;
-          const binaryData = this.helpers.assertBinaryData(i, binaryPropertyName);
-          const buffer = await this.helpers.getBinaryDataBuffer(i, binaryPropertyName);
+          const propertyNames = binaryPropertyName.split(',').map((name: string) => name.trim()).filter((name: string) => name.length > 0);
 
-          const boundary = "----n8nFormBoundary" + Math.random().toString(36).substring(2);
-          const fileName = binaryData.fileName || "upload";
-          const mimeType = binaryData.mimeType || "application/octet-stream";
+          const uploadResults: any[] = [];
+          const uploadErrors: any[] = [];
 
-          const header = Buffer.from(
-            `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName}"\r\nContent-Type: ${mimeType}\r\n\r\n`,
-          );
-          const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
-          const multipartBody = Buffer.concat([header, buffer, footer]);
-
-          responseData = await this.helpers.httpRequestWithAuthentication.call(
-            this as unknown as IAllExecuteFunctions,
-            "postoraApi",
-            {
-              method: "POST",
-              url: `${baseUrl}/api/v1/upload-media`,
-              headers: {
-                "Content-Type": `multipart/form-data; boundary=${boundary}`,
-              },
-              body: multipartBody,
-            },
-          );
-
-          // Parse JSON response if it comes back as a string
-          if (typeof responseData === "string") {
+          for (const prop of propertyNames) {
             try {
-              responseData = JSON.parse(responseData);
-            } catch (_) {
-              /* keep as-is */
+              const binaryData = this.helpers.assertBinaryData(i, prop);
+              const buffer = await this.helpers.getBinaryDataBuffer(i, prop);
+
+              const boundary = "----n8nFormBoundary" + Math.random().toString(36).substring(2);
+              const fileName = binaryData.fileName || "upload";
+              const mimeType = binaryData.mimeType || "application/octet-stream";
+
+              const header = Buffer.from(
+                `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName}"\r\nContent-Type: ${mimeType}\r\n\r\n`,
+              );
+              const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
+              const multipartBody = Buffer.concat([header, buffer, footer]);
+
+              let result = await this.helpers.httpRequestWithAuthentication.call(
+                this as unknown as IAllExecuteFunctions,
+                "postoraApi",
+                {
+                  method: "POST",
+                  url: `${baseUrl}/api/v1/upload-media`,
+                  headers: {
+                    "Content-Type": `multipart/form-data; boundary=${boundary}`,
+                  },
+                  body: multipartBody,
+                },
+              );
+
+              if (typeof result === "string") {
+                try { result = JSON.parse(result); } catch (_) { /* keep as-is */ }
+              }
+
+              uploadResults.push({ field: prop, success: true, ...(result as object) });
+            } catch (err: any) {
+              uploadErrors.push({ field: prop, success: false, error: err.message });
             }
           }
+
+          responseData = {
+            total: propertyNames.length,
+            uploaded: uploadResults.length,
+            failed: uploadErrors.length,
+            results: [...uploadResults, ...uploadErrors],
+          };
         }
 
         if (Array.isArray(responseData)) {
