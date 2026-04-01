@@ -366,17 +366,13 @@ class Postora {
                     const socialAccounts = this.getNodeParameter(`socialAccounts_${platform}`, i);
                     // Normalize mediaSource — handle n8n expression mode returning raw strings
                     let mediaSource = this.getNodeParameter("mediaSource", i, "none");
+                    const rawMediaSource = mediaSource; // Keep original before normalization
                     mediaSource = mediaSource?.toLowerCase?.().trim() || "none";
+                    // Smart detection: if expression mode returned an actual URL instead of "url"/"binary"/"none",
+                    // treat it as a direct media URL
+                    let expressionModeUrls = [];
                     if (!["url", "binary", "none"].includes(mediaSource)) {
-                        mediaSource = "none"; // Fall back safely if expression mode returns unexpected value
-                    }
-                    const mediaUrls = mediaSource === "url"
-                        ? this.getNodeParameter("mediaUrls", i, "")
-                            .split(",")
-                            .map((s) => s.trim())
-                            .filter((s) => {
-                            if (!s)
-                                return false;
+                        const possibleUrls = rawMediaSource.split(",").map(s => s.trim()).filter(s => {
                             try {
                                 new URL(s);
                                 return true;
@@ -384,8 +380,33 @@ class Postora {
                             catch {
                                 return false;
                             }
-                        })
-                        : [];
+                        });
+                        if (possibleUrls.length > 0) {
+                            mediaSource = "url";
+                            expressionModeUrls = possibleUrls;
+                        }
+                        else {
+                            mediaSource = "none";
+                        }
+                    }
+                    const mediaUrls = expressionModeUrls.length > 0
+                        ? expressionModeUrls
+                        : mediaSource === "url"
+                            ? this.getNodeParameter("mediaUrls", i, "")
+                                .split(",")
+                                .map((s) => s.trim())
+                                .filter((s) => {
+                                if (!s)
+                                    return false;
+                                try {
+                                    new URL(s);
+                                    return true;
+                                }
+                                catch {
+                                    return false;
+                                }
+                            })
+                            : [];
                     if (mediaSource === "url" && mediaUrls.length === 0) {
                         throw new Error("Media source is set to URL but no valid URLs were provided. " +
                             "Ensure URLs are direct links to media files (e.g. https://example.com/image.jpg). " +
@@ -487,7 +508,7 @@ class Postora {
                     const multipartBody = Buffer.concat([header, buffer, footer]);
                     responseData = await this.helpers.httpRequestWithAuthentication.call(this, "postoraApi", {
                         method: "POST",
-                        url: `${baseUrl}/api/v1/media/upload`,
+                        url: `${baseUrl}/api/v1/upload-media`,
                         headers: {
                             "Content-Type": `multipart/form-data; boundary=${boundary}`,
                         },

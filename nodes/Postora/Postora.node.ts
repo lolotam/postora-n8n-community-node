@@ -559,7 +559,7 @@ export class Postora implements INodeType {
             "postoraApi",
             {
               method: "POST",
-              url: `${baseUrl}/api/v1/media/upload`,
+              url: `${baseUrl}/api/v1/upload-media`,
               headers: {
                 "Content-Type": `multipart/form-data; boundary=${boundary}`,
               },
