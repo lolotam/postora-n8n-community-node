@@ -4,6 +4,7 @@ export declare class Postora implements INodeType {
     methods: {
         loadOptions: {
             getAccounts(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]>;
+            getAccountsForListFilter(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]>;
         };
     };
     execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]>;

@@ -314,6 +314,52 @@ export class Postora implements INodeType {
         default: 20,
         displayOptions: { show: { resource: ["post"], operation: ["list"] } },
       },
+      {
+        displayName: "Platform Filter",
+        name: "platformFilter",
+        type: "options",
+        options: [
+          { name: "All", value: "" },
+          { name: "Facebook", value: "facebook" },
+          { name: "Instagram", value: "instagram" },
+          { name: "TikTok", value: "tiktok" },
+          { name: "YouTube", value: "youtube" },
+          { name: "LinkedIn", value: "linkedin" },
+          { name: "X (Twitter)", value: "twitter" },
+          { name: "Pinterest", value: "pinterest" },
+          { name: "Threads", value: "threads" },
+          { name: "Bluesky", value: "bluesky" },
+          { name: "Reddit", value: "reddit" },
+        ],
+        default: "",
+        displayOptions: { show: { resource: ["post"], operation: ["list"] } },
+        description: "Filter posts by platform",
+      },
+      {
+        displayName: "Account Filter",
+        name: "accountFilter",
+        type: "options",
+        typeOptions: { loadOptionsMethod: "getAccountsForListFilter", loadOptionsDependsOn: ["platformFilter"] },
+        default: "",
+        displayOptions: { show: { resource: ["post"], operation: ["list"] } },
+        description: "Filter posts by a specific social account",
+      },
+      {
+        displayName: "Date From",
+        name: "dateFrom",
+        type: "dateTime",
+        default: "",
+        displayOptions: { show: { resource: ["post"], operation: ["list"] } },
+        description: "Filter posts created on or after this date",
+      },
+      {
+        displayName: "Date To",
+        name: "dateTo",
+        type: "dateTime",
+        default: "",
+        displayOptions: { show: { resource: ["post"], operation: ["list"] } },
+        description: "Filter posts created on or before this date",
+      },
 
       // ═══════════════════════════════════
       // Media → Upload fields
@@ -363,6 +409,41 @@ export class Postora implements INodeType {
             value: account.id,
           };
         });
+      },
+
+      async getAccountsForListFilter(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+        const credentials = await this.getCredentials("postoraApi");
+        const baseUrl = credentials.baseUrl as string;
+        const platformFilter = this.getCurrentNodeParameter("platformFilter") as string;
+
+        let url = `${baseUrl}/api/v1/accounts`;
+        if (platformFilter) {
+          url += `?platform=${encodeURIComponent(platformFilter)}`;
+        }
+
+        const response = await this.helpers.httpRequestWithAuthentication.call(
+          this as unknown as IAllExecuteFunctions,
+          "postoraApi",
+          {
+            method: "GET",
+            url,
+            json: true,
+          },
+        );
+
+        const options: INodePropertyOptions[] = [{ name: "All", value: "" }];
+
+        if (response?.accounts && Array.isArray(response.accounts)) {
+          for (const account of response.accounts) {
+            const displayName = account.name || account.platform_username || "Unknown";
+            options.push({
+              name: `${displayName} (${account.platform})`,
+              value: account.id,
+            });
+          }
+        }
+
+        return options;
       },
     },
   };
@@ -524,8 +605,17 @@ export class Postora implements INodeType {
         else if (resource === "post" && operation === "list") {
           const statusFilter = this.getNodeParameter("statusFilter", i, "") as string;
           const limit = this.getNodeParameter("limit", i, 20) as number;
+          const platformFilter = this.getNodeParameter("platformFilter", i, "") as string;
+          const accountFilter = this.getNodeParameter("accountFilter", i, "") as string;
+          const dateFrom = this.getNodeParameter("dateFrom", i, "") as string;
+          const dateTo = this.getNodeParameter("dateTo", i, "") as string;
+
           let url = `${baseUrl}/api/v1/posts?limit=${limit}`;
           if (statusFilter) url += `&status=${statusFilter}`;
+          if (platformFilter) url += `&platform=${encodeURIComponent(platformFilter)}`;
+          if (accountFilter) url += `&account_id=${encodeURIComponent(accountFilter)}`;
+          if (dateFrom) url += `&date_from=${encodeURIComponent(dateFrom)}`;
+          if (dateTo) url += `&date_to=${encodeURIComponent(dateTo)}`;
 
           responseData = await this.helpers.httpRequestWithAuthentication.call(
             this as unknown as IAllExecuteFunctions,
