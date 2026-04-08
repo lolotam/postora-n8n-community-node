@@ -130,6 +130,25 @@ export class Postora implements INodeType {
           }) as INodeProperties,
       ),
       {
+        displayName: "Post Type",
+        name: "postType",
+        type: "options",
+        options: [
+          { name: "Feed", value: "feed", description: "Regular feed post" },
+          {
+            name: "Story",
+            value: "story",
+            description:
+              "Stories only support media (photos & videos). When Story is selected, captions, locations, first comments, and all other text fields are ignored by the API — only the media file is published.",
+          },
+          { name: "Reel", value: "reel", description: "Short-form video (Reels)" },
+        ],
+        default: "feed",
+        displayOptions: { show: { resource: ["post"], operation: ["create"], platform: ["facebook", "instagram"] } },
+        description:
+          "Where to publish. Story only supports a single photo or video — all other fields (caption, location, first comment, etc.) are ignored for stories.",
+      },
+      {
         displayName: "Caption",
         name: "caption",
         type: "string",
@@ -553,6 +572,19 @@ export class Postora implements INodeType {
           }
 
           if (scheduledAt) body.scheduled_at = scheduledAt;
+
+          // Post type (Facebook & Instagram only)
+          if (platform === "facebook" || platform === "instagram") {
+            const postType = this.getNodeParameter("postType", i, "feed") as string;
+            if (platform === "facebook") {
+              body.facebook_post_type = postType;
+            } else {
+              body.instagram_post_type = postType;
+              if (postType === "story") {
+                body.instagram_media_type = "stories";
+              }
+            }
+          }
 
           // Platform-specific metadata
           if (platform === "youtube") {
