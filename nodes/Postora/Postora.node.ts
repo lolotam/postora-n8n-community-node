@@ -292,6 +292,17 @@ export class Postora implements INodeType {
             type: "string",
             default: "",
           },
+          // First Comment
+          {
+            displayName: "First Comment",
+            name: "firstComment",
+            type: "string",
+            typeOptions: {
+              rows: 3,
+            },
+            default: "",
+            description: "📝 Auto-post a first comment after publishing. Supported on Facebook, Instagram, LinkedIn, and YouTube.",
+          },
         ],
       },
 
@@ -603,6 +614,7 @@ export class Postora implements INodeType {
           if (additionalOptions.pinterestTitle) body.pinterest_title = additionalOptions.pinterestTitle;
           if (additionalOptions.redditSubreddit) body.reddit_subreddit = additionalOptions.redditSubreddit;
           if (additionalOptions.redditTitle) body.reddit_title = additionalOptions.redditTitle;
+          if (additionalOptions.firstComment) body.first_comment = additionalOptions.firstComment;
 
           responseData = await this.helpers.httpRequestWithAuthentication.call(
             this as unknown as IAllExecuteFunctions,
