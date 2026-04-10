@@ -133,13 +133,14 @@ export class Postora implements INodeType {
         displayName: "Post Type",
         name: "postType",
         type: "options",
+        noDataExpression: true,
         options: [
           { name: "Feed", value: "feed", description: "Regular feed post" },
           {
             name: "Story",
             value: "story",
             description:
-              "Stories only support media (photos & videos). When Story is selected, captions, locations, first comments, and all other text fields are ignored by the API — only the media file is published.",
+              "📸 Stories only support media (photos & videos). When Story is selected, captions, locations, first comments, and all other text fields are ignored by the API — only the media file is published.",
           },
           { name: "Reel", value: "reel", description: "Short-form video (Reels)" },
         ],
@@ -148,6 +149,7 @@ export class Postora implements INodeType {
         description:
           "Where to publish. Story only supports a single photo or video — all other fields (caption, location, first comment, etc.) are ignored for stories.",
       },
+      // Caption for FB/IG — hidden when Story is selected
       {
         displayName: "Caption",
         name: "caption",
@@ -155,13 +157,31 @@ export class Postora implements INodeType {
         typeOptions: { rows: 4 },
         default: "",
         required: true,
-        displayOptions: { show: { resource: ["post"], operation: ["create"] } },
+        displayOptions: {
+          show: { resource: ["post"], operation: ["create"], platform: ["facebook", "instagram"] },
+          hide: { postType: ["story"] },
+        },
+        description: "The post caption / text content",
+      },
+      // Caption for all other platforms (no postType field exists for them)
+      {
+        displayName: "Caption",
+        name: "caption",
+        type: "string",
+        typeOptions: { rows: 4 },
+        default: "",
+        required: true,
+        displayOptions: {
+          show: { resource: ["post"], operation: ["create"] },
+          hide: { platform: ["facebook", "instagram"] },
+        },
         description: "The post caption / text content",
       },
       {
         displayName: "Media Source",
         name: "mediaSource",
         type: "options",
+        noDataExpression: true,
         options: [
           { name: "None", value: "none" },
           { name: "URL", value: "url" },
@@ -197,21 +217,67 @@ export class Postora implements INodeType {
         displayOptions: { show: { resource: ["post"], operation: ["create"] } },
         description: "Schedule post for a future time (ISO 8601). Leave empty to post immediately.",
       },
+      // ── Facebook Additional Options (hidden for Story) ──
       {
         displayName: "Additional Options",
         name: "additionalOptions",
         type: "collection",
         placeholder: "Add Option",
         default: {},
-        displayOptions: { show: { resource: ["post"], operation: ["create"] } },
+        displayOptions: {
+          show: { resource: ["post"], operation: ["create"], platform: ["facebook"] },
+          hide: { postType: ["story"] },
+        },
         options: [
-          // YouTube options
+          {
+            displayName: "First Comment",
+            name: "firstComment",
+            type: "string",
+            typeOptions: { rows: 3 },
+            default: "",
+            description: "📝 Auto-post a first comment after publishing.",
+          },
+        ],
+      },
+      // ── Instagram Additional Options (hidden for Story) ──
+      {
+        displayName: "Additional Options",
+        name: "additionalOptions",
+        type: "collection",
+        placeholder: "Add Option",
+        default: {},
+        displayOptions: {
+          show: { resource: ["post"], operation: ["create"], platform: ["instagram"] },
+          hide: { postType: ["story"] },
+        },
+        options: [
+          {
+            displayName: "First Comment",
+            name: "firstComment",
+            type: "string",
+            typeOptions: { rows: 3 },
+            default: "",
+            description: "📝 Auto-post a first comment after publishing.",
+          },
+        ],
+      },
+      // ── YouTube Additional Options ──
+      {
+        displayName: "Additional Options",
+        name: "additionalOptions",
+        type: "collection",
+        placeholder: "Add Option",
+        default: {},
+        displayOptions: {
+          show: { resource: ["post"], operation: ["create"], platform: ["youtube"] },
+        },
+        options: [
           {
             displayName: "YouTube Title",
             name: "youtubeTitle",
             type: "string",
             default: "",
-            description: "Title for YouTube videos",
+            description: "🎬 Title for YouTube videos.",
           },
           {
             displayName: "YouTube Visibility",
@@ -223,16 +289,36 @@ export class Postora implements INodeType {
               { name: "Private", value: "private" },
             ],
             default: "public",
-            description: "YouTube video visibility setting",
+            description: "🔒 YouTube video visibility setting.",
           },
           {
             displayName: "YouTube Category",
             name: "youtubeCategory",
             type: "string",
             default: "22",
-            description: "YouTube category ID (default: People & Blogs)",
+            description: "📂 YouTube category ID (default: 22 — People & Blogs).",
           },
-          // TikTok options
+          {
+            displayName: "First Comment",
+            name: "firstComment",
+            type: "string",
+            typeOptions: { rows: 3 },
+            default: "",
+            description: "📝 Auto-post a first comment after publishing.",
+          },
+        ],
+      },
+      // ── TikTok Additional Options ──
+      {
+        displayName: "Additional Options",
+        name: "additionalOptions",
+        type: "collection",
+        placeholder: "Add Option",
+        default: {},
+        displayOptions: {
+          show: { resource: ["post"], operation: ["create"], platform: ["tiktok"] },
+        },
+        options: [
           {
             displayName: "TikTok Privacy",
             name: "tiktokPrivacy",
@@ -244,64 +330,124 @@ export class Postora implements INodeType {
               { name: "Only Me", value: "SELF_ONLY" },
             ],
             default: "PUBLIC_TO_EVERYONE",
-            description: "TikTok video privacy level",
+            description: "🔒 TikTok video privacy level.",
           },
           {
             displayName: "TikTok Allow Comments",
             name: "tiktokAllowComments",
             type: "boolean",
             default: false,
+            description: "💬 Allow comments on TikTok video.",
           },
           {
             displayName: "TikTok Allow Duet",
             name: "tiktokAllowDuet",
             type: "boolean",
             default: false,
+            description: "🎭 Allow duets on TikTok video.",
           },
           {
             displayName: "TikTok Allow Stitch",
             name: "tiktokAllowStitch",
             type: "boolean",
             default: false,
+            description: "✂️ Allow stitches on TikTok video.",
           },
-          // Pinterest options
+        ],
+      },
+      // ── LinkedIn Additional Options ──
+      {
+        displayName: "Additional Options",
+        name: "additionalOptions",
+        type: "collection",
+        placeholder: "Add Option",
+        default: {},
+        displayOptions: {
+          show: { resource: ["post"], operation: ["create"], platform: ["linkedin"] },
+        },
+        options: [
+          {
+            displayName: "First Comment",
+            name: "firstComment",
+            type: "string",
+            typeOptions: { rows: 3 },
+            default: "",
+            description: "📝 Auto-post a first comment after publishing.",
+          },
+        ],
+      },
+      // ── Pinterest Additional Options ──
+      {
+        displayName: "Additional Options",
+        name: "additionalOptions",
+        type: "collection",
+        placeholder: "Add Option",
+        default: {},
+        displayOptions: {
+          show: { resource: ["post"], operation: ["create"], platform: ["pinterest"] },
+        },
+        options: [
           {
             displayName: "Pinterest Board ID",
             name: "pinterestBoardId",
             type: "string",
             default: "",
-            description: "Pinterest board to pin to",
+            description: "📌 Pinterest board to pin to.",
           },
           {
             displayName: "Pinterest Title",
             name: "pinterestTitle",
             type: "string",
             default: "",
+            description: "📌 Title for the Pinterest pin.",
           },
-          // Reddit options
+        ],
+      },
+      // ── Threads Additional Options ──
+      {
+        displayName: "Additional Options",
+        name: "additionalOptions",
+        type: "collection",
+        placeholder: "Add Option",
+        default: {},
+        displayOptions: {
+          show: { resource: ["post"], operation: ["create"], platform: ["threads"] },
+        },
+        options: [
+          {
+            displayName: "First Comment",
+            name: "firstComment",
+            type: "string",
+            typeOptions: { rows: 3 },
+            default: "",
+            description: "📝 Auto-post a first comment after publishing.",
+          },
+        ],
+      },
+      // ── Reddit Additional Options ──
+      {
+        displayName: "Additional Options",
+        name: "additionalOptions",
+        type: "collection",
+        placeholder: "Add Option",
+        default: {},
+        displayOptions: {
+          show: { resource: ["post"], operation: ["create"], platform: ["reddit"] },
+        },
+        options: [
           {
             displayName: "Reddit Subreddit",
             name: "redditSubreddit",
             type: "string",
             default: "",
-            description: "Subreddit name (without r/)",
+            description: "📋 Subreddit name (without r/).",
           },
           {
             displayName: "Reddit Title",
             name: "redditTitle",
             type: "string",
             default: "",
-          },
-          // First Comment
-          {
-            displayName: "First Comment",
-            name: "firstComment",
-            type: "string",
-            typeOptions: {
-              rows: 3,
-            },
-            default: "",
-            description: "📝 Auto-post a first comment after publishing. Supported on Facebook, Instagram, LinkedIn, and YouTube.",
+            description: "📋 Title for the Reddit post.",
           },
         ],
       },

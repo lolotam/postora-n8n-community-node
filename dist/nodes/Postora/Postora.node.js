@@ -273,6 +273,17 @@ class Postora {
                             type: "string",
                             default: "",
                         },
+                        // First Comment
+                        {
+                            displayName: "First Comment",
+                            name: "firstComment",
+                            type: "string",
+                            typeOptions: {
+                                rows: 3,
+                            },
+                            default: "",
+                            description: "📝 Auto-post a first comment after publishing. Supported on Facebook, Instagram, LinkedIn, and YouTube.",
+                        },
                     ],
                 },
                 // ═══════════════════════════════════
@@ -564,6 +575,8 @@ class Postora {
                         body.reddit_subreddit = additionalOptions.redditSubreddit;
                     if (additionalOptions.redditTitle)
                         body.reddit_title = additionalOptions.redditTitle;
+                    if (additionalOptions.firstComment)
+                        body.first_comment = additionalOptions.firstComment;
                     responseData = await this.helpers.httpRequestWithAuthentication.call(this, "postoraApi", {
                         method: "POST",
                         url: `${baseUrl}/api/v1/post`,
