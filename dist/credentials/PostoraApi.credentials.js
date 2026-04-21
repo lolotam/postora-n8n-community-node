@@ -6,6 +6,7 @@ class PostoraApi {
         this.name = 'postoraApi';
         this.displayName = 'Postora API';
         this.documentationUrl = 'https://postora.cloud/docs/api';
+        this.icon = 'file:postora.png';
         this.properties = [
             {
                 displayName: 'API Key',

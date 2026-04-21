@@ -7,6 +7,9 @@ import {
   INodeType,
   INodeTypeDescription,
   INodeProperties,
+  NodeConnectionTypes,
+  NodeApiError,
+  JsonObject,
 } from "n8n-workflow";
 
 const platformOptions = [
@@ -34,8 +37,8 @@ export class Postora implements INodeType {
     defaults: {
       name: "Postora",
     },
-    inputs: ["main"],
-    outputs: ["main"],
+    inputs: [NodeConnectionTypes.Main],
+    outputs: [NodeConnectionTypes.Main],
     credentials: [
       {
         name: "postoraApi",
@@ -50,9 +53,9 @@ export class Postora implements INodeType {
         type: "options",
         noDataExpression: true,
         options: [
-          { name: "Post", value: "post" },
-          { name: "Media", value: "media" },
           { name: "Account", value: "account" },
+          { name: "Media", value: "media" },
+          { name: "Post", value: "post" },
         ],
         default: "post",
       },
@@ -873,9 +876,9 @@ export class Postora implements INodeType {
         }
 
         if (Array.isArray(responseData)) {
-          returnData.push(...responseData.map((item: any) => ({ json: item })));
+          returnData.push(...responseData.map((item: any) => ({ json: item, pairedItem: { item: i } })));
         } else {
-          returnData.push({ json: responseData ?? {} });
+          returnData.push({ json: responseData ?? {}, pairedItem: { item: i } });
         }
       } catch (error: any) {
         if (this.continueOnFail()) {
@@ -885,7 +888,7 @@ export class Postora implements INodeType {
           });
           continue;
         }
-        throw error;
+        throw new NodeApiError(this.getNode(), error as JsonObject);
       }
     }
 

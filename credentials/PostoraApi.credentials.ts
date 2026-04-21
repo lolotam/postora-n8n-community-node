@@ -9,6 +9,7 @@ export class PostoraApi implements ICredentialType {
   name = 'postoraApi';
   displayName = 'Postora API';
   documentationUrl = 'https://postora.cloud/docs/api';
+  icon = 'file:postora.png' as const;
 
   properties: INodeProperties[] = [
     {

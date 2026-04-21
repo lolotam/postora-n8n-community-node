@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Postora = void 0;
+const n8n_workflow_1 = require("n8n-workflow");
 const platformOptions = [
     { name: "1. Facebook", value: "facebook" },
     { name: "2. Instagram", value: "instagram" },
@@ -26,8 +27,8 @@ class Postora {
             defaults: {
                 name: "Postora",
             },
-            inputs: ["main"],
-            outputs: ["main"],
+            inputs: [n8n_workflow_1.NodeConnectionTypes.Main],
+            outputs: [n8n_workflow_1.NodeConnectionTypes.Main],
             credentials: [
                 {
                     name: "postoraApi",
@@ -42,9 +43,9 @@ class Postora {
                     type: "options",
                     noDataExpression: true,
                     options: [
-                        { name: "Post", value: "post" },
-                        { name: "Media", value: "media" },
                         { name: "Account", value: "account" },
+                        { name: "Media", value: "media" },
+                        { name: "Post", value: "post" },
                     ],
                     default: "post",
                 },
@@ -811,10 +812,10 @@ class Postora {
                     };
                 }
                 if (Array.isArray(responseData)) {
-                    returnData.push(...responseData.map((item) => ({ json: item })));
+                    returnData.push(...responseData.map((item) => ({ json: item, pairedItem: { item: i } })));
                 }
                 else {
-                    returnData.push({ json: responseData ?? {} });
+                    returnData.push({ json: responseData ?? {}, pairedItem: { item: i } });
                 }
             }
             catch (error) {
@@ -825,7 +826,7 @@ class Postora {
                     });
                     continue;
                 }
-                throw error;
+                throw new n8n_workflow_1.NodeApiError(this.getNode(), error);
             }
         }
         return [returnData];
