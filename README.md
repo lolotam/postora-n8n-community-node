@@ -37,6 +37,46 @@ You need a Postora API key to use this node:
 3. Generate a new API key
 4. In n8n, create a new **Postora API** credential and paste the key
 
+## Usage Examples
+
+### Schedule a Post to Instagram
+
+1. Add a **Postora** node to your workflow.
+2. Set **Resource** to `Post`.
+3. Set **Operation** to `Create`.
+4. Set **Platform** to `Instagram`.
+5. In **Social Accounts**, select the Instagram account(s) to publish to.
+6. (Optional) Set **Post Type** to `Reel` for short-form video or `Story` for ephemeral content.
+7. Write your **Caption** (disabled for Stories — only media is posted).
+8. Set **Media Source** to `URL` and paste a direct image or video URL (e.g. `https://example.com/photo.jpg`).
+9. (Optional) Set **Schedule At** to a future date/time to publish later. Leave empty to post immediately.
+10. (Optional) Expand **Additional Options** and add a **First Comment**.
+11. Execute the node. The response includes a `post_id` you can use to check status later.
+
+### List Connected Accounts
+
+Use this to verify your credentials work and discover which social accounts are available:
+
+1. Add a **Postora** node to your workflow.
+2. Set **Resource** to `Account`.
+3. Set **Operation** to `List`.
+4. Execute the node. The output lists every connected social account with its ID, name, and platform.
+
+### Publish a YouTube Video
+
+1. Add a **Postora** node to your workflow.
+2. Set **Resource** to `Post`.
+3. Set **Operation** to `Create`.
+4. Set **Platform** to `YouTube`.
+5. In **Social Accounts**, select the YouTube channel to publish to.
+6. Write your video description in **Caption**.
+7. Set **Media Source** to `URL` and paste a direct video URL.
+8. Expand **Additional Options** and configure:
+   - **YouTube Title** — the video title.
+   - **YouTube Visibility** — `Public`, `Unlisted`, or `Private`.
+   - **YouTube Category** — category ID (default: `22` for People & Blogs).
+9. Execute the node.
+
 ## Platform-Specific Options
 
 When creating a post, you can set platform-specific options:
