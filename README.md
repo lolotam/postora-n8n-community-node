@@ -88,6 +88,26 @@ When creating a post, you can set platform-specific options:
 | Pinterest | Board ID, Title |
 | Reddit | Subreddit, Title |
 
+## Media Source Options
+
+When creating a post, you can attach media using one of three methods:
+
+| Source | Description |
+|--------|-------------|
+| **None** | Text-only post, no media attached |
+| **URL** | Provide one or more comma-separated media URLs (e.g., `https://example.com/photo1.jpg,https://example.com/photo2.jpg`) |
+| **Binary Data** | Attach binary file(s) from previous nodes. Specify property names as comma-separated values (e.g., `data,data1,data2`) to upload multiple files at once |
+
+### Binary Data Details
+
+To use binary data:
+1. Connect a node that outputs binary data (e.g., HTTP Request, Read Binary File)
+2. Select **Binary Data** as the Media Source
+3. Enter the binary property name(s) — default is `data`
+4. For multiple files, use comma-separated names: `data,data1,data2`
+
+Binary files are automatically converted to base64 and sent via the `media_base64` API parameter.
+
 ## Resources
 
 - [Postora Website](https://postora.cloud)
