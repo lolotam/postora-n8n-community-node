@@ -90,13 +90,14 @@ When creating a post, you can set platform-specific options:
 
 ## Media Source Options
 
-When creating a post, you can attach media using one of three methods:
+When creating a post, you can attach media using one of four methods:
 
 | Source | Description |
 |--------|-------------|
 | **None** | Text-only post, no media attached |
 | **URL** | Provide one or more comma-separated media URLs (e.g., `https://example.com/photo1.jpg,https://example.com/photo2.jpg`) |
 | **Binary Data** | Attach binary file(s) from previous nodes. Specify property names as comma-separated values (e.g., `data,data1,data2`) to upload multiple files at once |
+| **Media File ID** | Reuse file(s) already uploaded via **Media → Upload**, by ID |
 
 ### Binary Data Details
 
@@ -107,6 +108,14 @@ To use binary data:
 4. For multiple files, use comma-separated names: `data,data1,data2`
 
 Binary files are automatically converted to base64 and sent via the `media_base64` API parameter.
+
+### Media File ID Details
+
+If you already uploaded file(s) with a **Media → Upload** step (e.g. earlier in the same workflow), you can post them without re-uploading:
+
+1. Select **Media File ID** as the Media Source on the **Post → Create** node.
+2. Enter the ID(s) returned by the Upload step in **Media File ID(s)**.
+3. For multiple files, separate IDs with a comma: `id-1,id-2,id-3`. Wrapping them in brackets (`[id-1, id-2, id-3]`) also works — the brackets are stripped automatically.
 
 ## Troubleshooting
 

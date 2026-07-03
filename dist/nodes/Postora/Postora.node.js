@@ -22,6 +22,15 @@ function describeBinaryError(error, propertyName) {
     }
     return message;
 }
+// Accepts both "id-1,id-2,id-3" and "[id-1, id-2, id-3]" — the brackets are just
+// stripped before splitting, so users can paste either style without a validation error.
+function parseCommaSeparatedList(raw) {
+    const withoutBrackets = raw.trim().replace(/^\[/, "").replace(/\]$/, "");
+    return withoutBrackets
+        .split(",")
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
+}
 async function readBinaryOrThrow(ctx, itemIndex, propertyName) {
     try {
         const binaryData = ctx.helpers.assertBinaryData(itemIndex, propertyName);
@@ -200,6 +209,7 @@ class Postora {
                         { name: "None", value: "none" },
                         { name: "URL", value: "url" },
                         { name: "Binary Data", value: "binary" },
+                        { name: "Media File ID", value: "mediafileid" },
                     ],
                     default: "none",
                     displayOptions: { show: { resource: ["post"], operation: ["create"] } },
@@ -220,6 +230,15 @@ class Postora {
                     default: "data",
                     displayOptions: { show: { resource: ["post"], operation: ["create"], mediaSource: ["binary"] } },
                     description: "Name of the binary property containing the media file(s). For multiple files, use comma-separated names (e.g., data,data1,data2).",
+                },
+                {
+                    displayName: "Media File ID(s)",
+                    name: "mediaFileIds",
+                    type: "string",
+                    default: "",
+                    displayOptions: { show: { resource: ["post"], operation: ["create"], mediaSource: ["mediafileid"] } },
+                    description: "One or more media file IDs previously returned by Media → Upload. Comma-separated for multiple files " +
+                        "(e.g. id-1,id-2,id-3) — the surrounding [ ] brackets are optional and stripped automatically.",
                 },
                 {
                     displayName: "Schedule At",
@@ -647,7 +666,7 @@ class Postora {
                     // Smart detection: if expression mode returned an actual URL instead of "url"/"binary"/"none",
                     // treat it as a direct media URL
                     let expressionModeUrls = [];
-                    if (!["url", "binary", "none"].includes(mediaSource)) {
+                    if (!["url", "binary", "none", "mediafileid"].includes(mediaSource)) {
                         const possibleUrls = rawMediaSource.split(",").map(s => s.trim()).filter(s => {
                             try {
                                 new URL(s);
@@ -688,6 +707,13 @@ class Postora {
                             "Ensure URLs are direct links to media files (e.g. https://example.com/image.jpg). " +
                             "If the Media Source field shows as a text input instead of a dropdown, click the gear icon and select 'Fixed'.");
                     }
+                    const mediaFileIds = mediaSource === "mediafileid"
+                        ? parseCommaSeparatedList(this.getNodeParameter("mediaFileIds", i, ""))
+                        : [];
+                    if (mediaSource === "mediafileid" && mediaFileIds.length === 0) {
+                        throw new Error("Media source is set to Media File ID but no IDs were provided. " +
+                            "Enter one or more IDs returned by a previous Media → Upload step, comma-separated (e.g. id-1,id-2,id-3).");
+                    }
                     const scheduledAt = this.getNodeParameter("scheduledAt", i, "");
                     const additionalOptions = this.getNodeParameter("additionalOptions", i, {});
                     const body = {
@@ -698,6 +724,8 @@ class Postora {
                         body.account_ids = socialAccounts;
                     if (mediaUrls.length)
                         body.media_urls = mediaUrls;
+                    if (mediaFileIds.length)
+                        body.media_file_ids = mediaFileIds;
                     // Binary data → base64 (supports multiple comma-separated property names)
                     if (mediaSource === "binary") {
                         const binaryProp = this.getNodeParameter("mediaBinaryProperty", i, "data");
