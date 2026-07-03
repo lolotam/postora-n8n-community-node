@@ -108,6 +108,16 @@ To use binary data:
 
 Binary files are automatically converted to base64 and sent via the `media_base64` API parameter.
 
+## Troubleshooting
+
+### "Could not find any entity of type BinaryDataFile matching..."
+
+This error comes from n8n itself, not from this node — it means n8n can no longer find the actual file bytes for a binary field on the item you're processing.
+
+The most common cause: the upstream node's output was **pinned** (📌) in the n8n editor while you were building the workflow. Pinning freezes the *shape* of the data, but the underlying file content lives in n8n's own storage and can be cleaned up over time (e.g. on restart, or by n8n's execution data retention settings). Once that happens, the pinned item still *looks* like it has a file attached, but reading it fails with this error.
+
+**Fix:** unpin the upstream node (click the pin icon again to remove it) and re-run the workflow with a fresh execution before testing **Media → Upload** or **Post → Create** with binary data.
+
 ## Resources
 
 - [Postora Website](https://postora.cloud)
