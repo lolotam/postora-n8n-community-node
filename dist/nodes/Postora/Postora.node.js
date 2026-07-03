@@ -31,6 +31,35 @@ function parseCommaSeparatedList(raw) {
         .map((item) => item.trim())
         .filter((item) => item.length > 0);
 }
+// Accepts a comma-separated string OR an array (the latter typically comes from an
+// n8n expression like ={{ $json.urls }}). Always returns a clean string[].
+function normalizeList(input) {
+    if (input == null)
+        return [];
+    if (Array.isArray(input)) {
+        return input.map((x) => String(x).trim()).filter((x) => x.length > 0);
+    }
+    return parseCommaSeparatedList(String(input));
+}
+// Throws a clear, field-named error for a visible required parameter that came
+// back empty — so users see "Required parameter 'X' is empty" instead of n8n's
+// generic "Could not get parameter" when a field is hidden/blank.
+function requireParam(value, label) {
+    const isEmpty = value === undefined ||
+        value === null ||
+        value === "" ||
+        (Array.isArray(value) && value.length === 0);
+    if (isEmpty) {
+        throw new Error(`Required parameter '${label}' is missing or empty. Open the node and fill in the '${label}' field, then run again.`);
+    }
+    return value;
+}
+// Validates that a string is a UUID (v1–v5). Used to reject obviously-bad media file
+// IDs before we hit the network.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function isValidUuid(value) {
+    return typeof value === "string" && UUID_RE.test(value.trim());
+}
 async function readBinaryOrThrow(ctx, itemIndex, propertyName) {
     try {
         const binaryData = ctx.helpers.assertBinaryData(itemIndex, propertyName);
@@ -40,6 +69,119 @@ async function readBinaryOrThrow(ctx, itemIndex, propertyName) {
     catch (error) {
         throw new Error(describeBinaryError(error, propertyName));
     }
+}
+// SSRF-safe download of a single media URL. Returns the raw buffer plus an inferred
+// filename and mime type. Rejects private/loopback hosts, non-http(s) schemes,
+// oversized or wrong-content-type responses, and follows redirects up to a limit.
+async function safeFetchAndStage(url) {
+    let parsed;
+    try {
+        parsed = new URL(url);
+    }
+    catch {
+        throw new Error(`'${url}' is not a valid URL.`);
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        throw new Error(`'${url}' uses an unsupported scheme. Only http and https are allowed.`);
+    }
+    const host = parsed.hostname.toLowerCase();
+    // Reject obvious loopback / private / link-local / reserved addresses before we
+    // ever do a DNS lookup. This catches literal IPs and the well-known private
+    // names; runtime DNS-rebinding is out of scope for a self-hosted n8n node.
+    if (host === "localhost" ||
+        host === "0.0.0.0" ||
+        host.endsWith(".local") ||
+        host.endsWith(".internal") ||
+        host.endsWith(".localhost")) {
+        throw new Error(`URL host '${host}' is not allowed (private/local).`);
+    }
+    const ipv4Match = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (ipv4Match) {
+        const oct = ipv4Match.slice(1, 5).map((n) => parseInt(n, 10));
+        if (oct.some((o) => o > 255)) {
+            throw new Error(`URL host '${host}' is not a valid IP address.`);
+        }
+        const [a, b] = oct;
+        const isLoopback = a === 127;
+        const isPrivate = a === 10 ||
+            (a === 172 && b >= 16 && b <= 31) ||
+            (a === 192 && b === 168) ||
+            a === 0 ||
+            a === 169 ||
+            a >= 224; // 224+ = multicast/reserved
+        if (isLoopback || isPrivate) {
+            throw new Error(`URL host '${host}' resolves to a private/loopback/reserved range.`);
+        }
+    }
+    // ://[::1] etc.
+    if (host.includes(":") && (host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host === "[::1]")) {
+        throw new Error(`URL host '${host}' is an IPv6 loopback/private address.`);
+    }
+    const MAX_BYTES = 50 * 1024 * 1024; // 50 MB
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    let res;
+    try {
+        res = await fetch(url, {
+            method: "GET",
+            redirect: "follow",
+            signal: controller.signal,
+            headers: { "User-Agent": "Postora-n8n-node/1.1.7" },
+        });
+    }
+    catch (err) {
+        throw new Error(`Failed to download '${url}': ${err?.message || String(err)}`);
+    }
+    finally {
+        clearTimeout(timeout);
+    }
+    if (!res.ok) {
+        throw new Error(`Download of '${url}' failed with HTTP ${res.status}.`);
+    }
+    // Followed redirects — re-check the final URL host for safety.
+    try {
+        const finalHost = new URL(res.url).hostname.toLowerCase();
+        if (finalHost === "localhost" ||
+            finalHost === "0.0.0.0" ||
+            finalHost.endsWith(".local") ||
+            finalHost.endsWith(".internal") ||
+            finalHost.endsWith(".localhost")) {
+            throw new Error(`Redirect landed on a private host '${finalHost}'.`);
+        }
+    }
+    catch {
+        // res.url parse failure is non-fatal
+    }
+    const contentType = (res.headers.get("content-type") || "").toLowerCase();
+    if (!contentType.startsWith("image/") && !contentType.startsWith("video/")) {
+        throw new Error(`'${url}' returned Content-Type '${contentType || "(none)"}'. Only image/* and video/* are accepted.`);
+    }
+    const contentLength = parseInt(res.headers.get("content-length") || "0", 10);
+    if (contentLength && contentLength > MAX_BYTES) {
+        throw new Error(`'${url}' is too large (${contentLength} bytes > ${MAX_BYTES} byte limit).`);
+    }
+    const arrayBuf = await res.arrayBuffer();
+    const buffer = Buffer.from(arrayBuf);
+    if (buffer.byteLength > MAX_BYTES) {
+        throw new Error(`'${url}' exceeded the ${MAX_BYTES}-byte download limit during transfer.`);
+    }
+    // Filename: Content-Disposition → URL basename → fallback by mime
+    let fileName = "upload";
+    const cd = res.headers.get("content-disposition") || "";
+    const cdMatch = cd.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)/i);
+    if (cdMatch && cdMatch[1]) {
+        fileName = decodeURIComponent(cdMatch[1].trim());
+    }
+    else {
+        const base = parsed.pathname.split("/").filter(Boolean).pop();
+        if (base)
+            fileName = decodeURIComponent(base);
+    }
+    if (fileName === "upload") {
+        const ext = contentType.startsWith("image/") ? "img" : "video";
+        fileName = `upload.${ext}`;
+    }
+    return { buffer, fileName, mimeType: contentType.split(";")[0].trim() };
 }
 const platformOptions = [
     { name: "1. Facebook", value: "facebook" },
@@ -569,13 +711,44 @@ class Postora {
                 // Media → Upload fields
                 // ═══════════════════════════════════
                 {
+                    displayName: "Media Source",
+                    name: "uploadMediaSource",
+                    type: "options",
+                    options: [
+                        { name: "Binary Property (n8n file)", value: "binary" },
+                        { name: "URL (download from web)", value: "url" },
+                        { name: "Media File ID (look up & re-attach)", value: "mediafileid" },
+                    ],
+                    default: "binary",
+                    displayOptions: { show: { resource: ["media"], operation: ["upload"] } },
+                    description: "Where the media should come from. Binary = an n8n binary property (file from a previous node). " +
+                        "URL = download the file(s) from a public web address. Media File ID = look up files you already " +
+                        "uploaded to Postora and re-attach them to this item (no re-upload).",
+                },
+                {
                     displayName: "Binary Property",
-                    name: "binaryPropertyName",
+                    name: "uploadBinaryProperty",
                     type: "string",
                     default: "data",
-                    required: true,
-                    displayOptions: { show: { resource: ["media"], operation: ["upload"] } },
+                    displayOptions: { show: { resource: ["media"], operation: ["upload"], uploadMediaSource: ["binary"] } },
                     description: "Name of the binary property containing the file to upload. For multiple files, use comma-separated names (e.g. 'IMAGE, VIDEO_')",
+                },
+                {
+                    displayName: "Media URLs",
+                    name: "uploadMediaUrls",
+                    type: "string",
+                    default: "",
+                    typeOptions: { multipleValues: false },
+                    displayOptions: { show: { resource: ["media"], operation: ["upload"], uploadMediaSource: ["url"] } },
+                    description: "One or more public URLs (http/https only) to download media from. Comma-separated, or use an expression returning an array (e.g. ={{ $json.urls }}).",
+                },
+                {
+                    displayName: "Media File ID(s)",
+                    name: "uploadMediaFileIds",
+                    type: "string",
+                    default: "",
+                    displayOptions: { show: { resource: ["media"], operation: ["upload"], uploadMediaSource: ["mediafileid"] } },
+                    description: "Postora media file UUID(s) to look up and re-attach. Comma-separated, or use an expression returning an array (e.g. ={{ $json.file_ids }}). Invalid or not-owned IDs are reported as failures but never crash the node.",
                 },
             ],
         };
@@ -653,12 +826,15 @@ class Postora {
                 }
                 // ── Post → Create ──
                 else if (resource === "post" && operation === "create") {
-                    const platform = this.getNodeParameter("platform", i);
+                    const platform = requireParam(this.getNodeParameter("platform", i, ""), "Platform");
                     if (["twitter", "tiktok", "reddit"].includes(platform)) {
                         throw new Error(`The selected platform (${platform}) is coming soon and is not yet available for publishing.`);
                     }
-                    const caption = this.getNodeParameter("caption", i);
-                    const socialAccounts = this.getNodeParameter(`socialAccounts_${platform}`, i);
+                    // Caption is hidden for Instagram/Facebook "story" posts (see displayOptions),
+                    // so it must be read with a fallback — otherwise n8n throws the generic
+                    // "Could not get parameter" error that masks the real cause.
+                    const caption = this.getNodeParameter("caption", i, "");
+                    const socialAccounts = requireParam(this.getNodeParameter(`socialAccounts_${platform}`, i, []), `Social Accounts (${platform})`);
                     // Normalize mediaSource — handle n8n expression mode returning raw strings
                     let mediaSource = this.getNodeParameter("mediaSource", i, "none");
                     const rawMediaSource = mediaSource; // Keep original before normalization
@@ -827,41 +1003,150 @@ class Postora {
                 }
                 // ── Media → Upload ──
                 else if (resource === "media" && operation === "upload") {
-                    const binaryPropertyName = this.getNodeParameter("binaryPropertyName", i);
-                    const propertyNames = binaryPropertyName.split(',').map((name) => name.trim()).filter((name) => name.length > 0);
+                    // Backward-compat: workflows saved before v1.1.7 set `binaryPropertyName`
+                    // and have no `uploadMediaSource`. Detect that and fall back to binary mode.
+                    const legacyBinary = this.getNodeParameter("binaryPropertyName", i, "");
+                    let uploadSource = this.getNodeParameter("uploadMediaSource", i, "").toLowerCase().trim();
+                    if (!uploadSource) {
+                        uploadSource = "binary";
+                    }
                     const uploadResults = [];
                     const uploadErrors = [];
-                    for (const prop of propertyNames) {
-                        try {
-                            const { binaryData, buffer } = await readBinaryOrThrow(this, i, prop);
-                            const boundary = "----n8nFormBoundary" + Math.random().toString(36).substring(2);
-                            const fileName = binaryData.fileName || "upload";
-                            const mimeType = binaryData.mimeType || "application/octet-stream";
-                            const header = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName}"\r\nContent-Type: ${mimeType}\r\n\r\n`);
-                            const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
-                            const multipartBody = Buffer.concat([header, buffer, footer]);
-                            let result = await this.helpers.httpRequestWithAuthentication.call(this, "postoraApi", {
-                                method: "POST",
-                                url: `${baseUrl}/api/v1/upload-media`,
-                                headers: {
-                                    "Content-Type": `multipart/form-data; boundary=${boundary}`,
-                                },
-                                body: multipartBody,
-                            });
-                            if (typeof result === "string") {
-                                try {
-                                    result = JSON.parse(result);
+                    // ── Binary source ──
+                    if (uploadSource === "binary") {
+                        const binaryPropRaw = this.getNodeParameter("uploadBinaryProperty", i, "") ||
+                            legacyBinary ||
+                            "data";
+                        const propertyNames = binaryPropRaw
+                            .split(",")
+                            .map((name) => name.trim())
+                            .filter((name) => name.length > 0);
+                        for (const prop of propertyNames) {
+                            try {
+                                const { binaryData, buffer } = await readBinaryOrThrow(this, i, prop);
+                                const boundary = "----n8nFormBoundary" + Math.random().toString(36).substring(2);
+                                const fileName = binaryData.fileName || "upload";
+                                const mimeType = binaryData.mimeType || "application/octet-stream";
+                                const header = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName}"\r\nContent-Type: ${mimeType}\r\n\r\n`);
+                                const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
+                                const multipartBody = Buffer.concat([header, buffer, footer]);
+                                let result = await this.helpers.httpRequestWithAuthentication.call(this, "postoraApi", {
+                                    method: "POST",
+                                    url: `${baseUrl}/api/v1/upload-media`,
+                                    headers: {
+                                        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+                                    },
+                                    body: multipartBody,
+                                });
+                                if (typeof result === "string") {
+                                    try {
+                                        result = JSON.parse(result);
+                                    }
+                                    catch (_) { /* keep as-is */ }
                                 }
-                                catch (_) { /* keep as-is */ }
+                                uploadResults.push({ field: prop, success: true, ...result });
                             }
-                            uploadResults.push({ field: prop, success: true, ...result });
-                        }
-                        catch (err) {
-                            uploadErrors.push({ field: prop, success: false, error: err.message });
+                            catch (err) {
+                                uploadErrors.push({ field: prop, success: false, error: err.message });
+                            }
                         }
                     }
+                    // ── URL source (SSRF-safe download, then upload as binary) ──
+                    else if (uploadSource === "url") {
+                        const urls = normalizeList(this.getNodeParameter("uploadMediaUrls", i, ""));
+                        if (urls.length === 0) {
+                            throw new Error("Media Source is set to URL but no URLs were provided. Enter one or more public http(s) URLs (comma-separated or an array expression).");
+                        }
+                        for (const url of urls) {
+                            try {
+                                const fetched = await safeFetchAndStage(url);
+                                const boundary = "----n8nFormBoundary" + Math.random().toString(36).substring(2);
+                                const header = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fetched.fileName}"\r\nContent-Type: ${fetched.mimeType}\r\n\r\n`);
+                                const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
+                                const multipartBody = Buffer.concat([header, fetched.buffer, footer]);
+                                let result = await this.helpers.httpRequestWithAuthentication.call(this, "postoraApi", {
+                                    method: "POST",
+                                    url: `${baseUrl}/api/v1/upload-media`,
+                                    headers: {
+                                        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+                                    },
+                                    body: multipartBody,
+                                });
+                                if (typeof result === "string") {
+                                    try {
+                                        result = JSON.parse(result);
+                                    }
+                                    catch (_) { /* keep as-is */ }
+                                }
+                                uploadResults.push({ url, success: true, ...result });
+                            }
+                            catch (err) {
+                                uploadErrors.push({ url, success: false, error: err.message });
+                            }
+                        }
+                    }
+                    // ── Media File ID source (look up & re-attach, never re-upload) ──
+                    else if (uploadSource === "mediafileid") {
+                        const rawIds = normalizeList(this.getNodeParameter("uploadMediaFileIds", i, ""));
+                        if (rawIds.length === 0) {
+                            throw new Error("Media Source is set to Media File ID but no IDs were provided. Enter one or more Postora media file UUIDs (comma-separated or an array expression).");
+                        }
+                        // Trim → drop empties → dedupe (case-insensitive)
+                        const seen = new Set();
+                        const fileIds = [];
+                        for (const id of rawIds) {
+                            const lower = id.toLowerCase();
+                            if (seen.has(lower))
+                                continue;
+                            seen.add(lower);
+                            fileIds.push(id.trim());
+                        }
+                        for (const id of fileIds) {
+                            if (!isValidUuid(id)) {
+                                uploadErrors.push({
+                                    file_id: id,
+                                    success: false,
+                                    error: `'${id}' is not a valid UUID. Media File IDs must be UUIDs returned by a previous Media → Upload step.`,
+                                });
+                                continue;
+                            }
+                            try {
+                                let result = await this.helpers.httpRequestWithAuthentication.call(this, "postoraApi", {
+                                    method: "GET",
+                                    url: `${baseUrl}/api/v1/media/${id}`,
+                                    json: true,
+                                });
+                                // The backend returns { success: true, media: {...} }.
+                                const media = (result && result.media) || null;
+                                uploadResults.push({
+                                    file_id: id,
+                                    success: true,
+                                    attached: true,
+                                    resolved: true,
+                                    media,
+                                });
+                            }
+                            catch (err) {
+                                const msg = err?.message || String(err);
+                                // 401 → fail the whole node (auth is broken everywhere)
+                                if (/401|unauthor/i.test(msg)) {
+                                    throw err;
+                                }
+                                // 404 (missing or not owned) → per-item failure, never crash
+                                uploadErrors.push({
+                                    file_id: id,
+                                    success: false,
+                                    error: "Not found or not owned by the authenticated user.",
+                                });
+                            }
+                        }
+                    }
+                    else {
+                        throw new Error(`Unknown Media Source '${uploadSource}'. Choose Binary, URL, or Media File ID.`);
+                    }
+                    const total = uploadResults.length + uploadErrors.length;
                     responseData = {
-                        total: propertyNames.length,
+                        total,
                         uploaded: uploadResults.length,
                         failed: uploadErrors.length,
                         results: [...uploadResults, ...uploadErrors],

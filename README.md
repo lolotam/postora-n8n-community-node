@@ -23,7 +23,10 @@ Follow the [installation guide](https://docs.n8n.io/integrations/community-nodes
 - **List** — List recent posts with optional status filter
 
 ### Media
-- **Upload** — Upload an image or video file to use in posts
+- **Upload** — Upload an image or video file to the Postora media library. Accepts three sources (see [Media → Upload](#media--upload) below):
+  - **Binary Property** — a file from a previous n8n node
+  - **URL** — download from a public web address (http/https)
+  - **Media File ID** — look up & re-attach a file already in Postora (no re-upload)
 
 ### Account
 - **List** — List all connected social media accounts
@@ -87,6 +90,52 @@ When creating a post, you can set platform-specific options:
 | TikTok | Privacy level, Allow Comments/Duet/Stitch |
 | Pinterest | Board ID, Title |
 | Reddit | Subreddit, Title |
+
+## Media → Upload
+
+The **Media → Upload** node ingests files into your Postora media library. Choose where the files come from with the **Media Source** dropdown. Every source produces the same output shape:
+
+```json
+{ "total": 2, "uploaded": 2, "failed": 0, "results": [ { "success": true, ... }, { "success": true, ... } ] }
+```
+
+The `results` array contains one entry per input item. Each entry has `success: true|false` plus source-specific fields (`field` for binary, `url` for URL, `file_id` for Media File ID).
+
+### Source 1 — Binary Property (n8n file)
+
+Default. Reads one or more binary properties produced by an upstream node and uploads each as a multipart file.
+
+- **Binary Property:** the property name(s). Default `data`. For multiple files, use comma-separated names: `data,data1,data2`.
+
+### Source 2 — URL (download from web)
+
+Downloads each URL on the n8n side and uploads the bytes to Postora. **SSRF-safe:** only `http`/`https` schemes; private/loopback/reserved hosts are rejected; 50 MB max; 30 s timeout; redirects followed up to a safe limit; the response `Content-Type` must be `image/*` or `video/*`.
+
+- **Media URLs:** one or more public URLs. Comma-separated, **or** use an expression returning an array:
+
+  ```
+  ={{ $json.urls }}
+  ```
+
+  Each bad URL (private host, wrong content-type, oversized, dead link) becomes a per-item failure in `results`; the node never crashes.
+
+### Source 3 — Media File ID (look up & re-attach)
+
+Resolves Postora media file UUID(s) you uploaded earlier and re-attaches them to this item — **no re-upload**. The node calls `GET /api/v1/media/:id` for each UUID, validates each is a well-formed UUID, and de-duplicates.
+
+- **Media File ID(s):** one or more UUIDs. Comma-separated, **or** an expression returning an array:
+
+  ```
+  ={{ $json.file_ids }}
+  ```
+
+> **Note on `uploaded` counts for this source:** "uploaded" means *successfully resolved & attached* media items, not files re-uploaded to storage.
+
+Invalid UUIDs, IDs you don't own, and missing IDs each become a per-item failure with a clear message. The node never crashes on bad input. If the API key is rejected (HTTP 401), the whole node fails — because auth is broken for everything.
+
+### Backward compatibility
+
+Workflows saved before v1.1.7 used a single **Binary Property** field (`binaryPropertyName`). Those workflows keep working unchanged: the node detects the legacy field and defaults the Media Source to **Binary Property** automatically.
 
 ## Media Source Options
 
