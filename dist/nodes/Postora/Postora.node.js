@@ -2,6 +2,36 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Postora = void 0;
 const n8n_workflow_1 = require("n8n-workflow");
+// n8n's own binary storage (mode: "database"/"filesystem") can lose track of a
+// referenced blob — most commonly when a node's output was "pinned" in the editor
+// and the underlying file was later cleaned up by n8n's own retention/pruning.
+// The resulting error ("Could not find any entity of type BinaryDataFile...") comes
+// straight out of n8n-core before any Postora code runs, so we can't prevent it —
+// only recognize it and explain what's actually wrong.
+function describeBinaryError(error, propertyName) {
+    const message = error?.message || String(error);
+    if (/BinaryDataFile/i.test(message) || /could not find any entity/i.test(message)) {
+        return (`The binary data for property "${propertyName}" is no longer available in n8n's storage. ` +
+            `This usually happens when the upstream node's output was "pinned" (📌) in the editor and the ` +
+            `underlying file was since cleaned up. Unpin the upstream node and re-run the workflow with a ` +
+            `fresh execution, then try again.`);
+    }
+    if (/no binary data/i.test(message)) {
+        return (`No binary data was found on property "${propertyName}" for this item. Check that the ` +
+            `upstream node actually outputs a binary property with this exact name.`);
+    }
+    return message;
+}
+async function readBinaryOrThrow(ctx, itemIndex, propertyName) {
+    try {
+        const binaryData = ctx.helpers.assertBinaryData(itemIndex, propertyName);
+        const buffer = await ctx.helpers.getBinaryDataBuffer(itemIndex, propertyName);
+        return { binaryData, buffer };
+    }
+    catch (error) {
+        throw new Error(describeBinaryError(error, propertyName));
+    }
+}
 const platformOptions = [
     { name: "1. Facebook", value: "facebook" },
     { name: "2. Instagram", value: "instagram" },
@@ -677,8 +707,7 @@ class Postora {
                             .filter(Boolean);
                         const base64Files = [];
                         for (const prop of binaryProps) {
-                            const bd = this.helpers.assertBinaryData(i, prop);
-                            const buf = await this.helpers.getBinaryDataBuffer(i, prop);
+                            const { binaryData: bd, buffer: buf } = await readBinaryOrThrow(this, i, prop);
                             base64Files.push(`data:${bd.mimeType};base64,${buf.toString("base64")}`);
                         }
                         body.media_base64 = base64Files;
@@ -776,8 +805,7 @@ class Postora {
                     const uploadErrors = [];
                     for (const prop of propertyNames) {
                         try {
-                            const binaryData = this.helpers.assertBinaryData(i, prop);
-                            const buffer = await this.helpers.getBinaryDataBuffer(i, prop);
+                            const { binaryData, buffer } = await readBinaryOrThrow(this, i, prop);
                             const boundary = "----n8nFormBoundary" + Math.random().toString(36).substring(2);
                             const fileName = binaryData.fileName || "upload";
                             const mimeType = binaryData.mimeType || "application/octet-stream";
