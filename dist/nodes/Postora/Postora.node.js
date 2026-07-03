@@ -85,7 +85,9 @@ async function readBinaryOrThrow(ctx, itemIndex, propertyName) {
 // the original URL AND to every redirect hop, since a hostname's safety can only be
 // judged once we know the concrete host being connected to.
 function isPrivateOrReservedHost(hostname) {
-    const host = hostname.toLowerCase();
+    // URL.hostname keeps the brackets on IPv6 literals (e.g. "[fd00::1]"), which
+    // would otherwise defeat every string check below.
+    const host = hostname.toLowerCase().replace(/^\[/, "").replace(/\]$/, "");
     if (host === "localhost" ||
         host === "0.0.0.0" ||
         host.endsWith(".local") ||
@@ -108,8 +110,8 @@ function isPrivateOrReservedHost(hostname) {
             a >= 224; // 224+ = multicast/reserved
         return isLoopback || isLinkLocal || isPrivate;
     }
-    // ::1, fc00::/7 (fc/fd prefixes) etc.
-    return host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host === "[::1]";
+    // ::1 (loopback), fc00::/7 (unique local), fe80::/10 (link-local)
+    return host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe8") || host.startsWith("fe9") || host.startsWith("fea") || host.startsWith("feb");
 }
 const MAX_REDIRECTS = 5;
 // Follows redirects one hop at a time, validating the scheme and host of EVERY hop

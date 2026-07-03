@@ -279,6 +279,24 @@ describe("Postora node — Media → Upload URL source SSRF protections", () => 
     expect(result[0].json.results[0].error).toMatch(/not allowed/i);
   });
 
+  it("regression: rejects an IPv6 loopback host, brackets and all (URL.hostname keeps the [ ])", async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as any;
+
+    const { result } = await run({
+      params: {
+        resource: "media",
+        operation: "upload",
+        uploadMediaSource: "url",
+        uploadMediaUrls: "http://[::1]/admin",
+      },
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result[0].json.failed).toBe(1);
+    expect(result[0].json.results[0].error).toMatch(/not allowed/i);
+  });
+
   it("rejects a direct private/loopback host without calling fetch at all", async () => {
     const fetchMock = jest.fn();
     global.fetch = fetchMock as any;

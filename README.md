@@ -109,7 +109,9 @@ Default. Reads one or more binary properties produced by an upstream node and up
 
 ### Source 2 — URL (download from web)
 
-Downloads each URL on the n8n side and uploads the bytes to Postora. **SSRF-safe:** only `http`/`https` schemes; private/loopback/reserved hosts are rejected — including on every redirect hop, validated *before* it's followed (up to 5 hops); 50 MB max; 30 s timeout; the response `Content-Type` must be `image/*` or `video/*`.
+Downloads each URL on the n8n side and uploads the bytes to Postora. **SSRF hardening:** only `http`/`https` schemes; literal private/loopback/link-local/reserved IPs (IPv4 and IPv6) and well-known internal hostnames are rejected — checked on the original URL *and* on every redirect hop, before that hop is requested (up to 5 hops); 50 MB max; 30 s per-hop timeout; the response `Content-Type` must be `image/*` or `video/*`.
+
+> **Known limit:** this checks the hostname/IP as written in the URL, not where DNS actually resolves it. A domain an attacker controls that resolves to an internal address (DNS rebinding) is not caught. If you accept media URLs from untrusted sources, treat this as defense-in-depth, not a full guarantee.
 
 - **Media URLs:** one or more public URLs. Comma-separated, **or** use an expression returning an array:
 
