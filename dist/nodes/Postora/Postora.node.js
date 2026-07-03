@@ -60,6 +60,17 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 function isValidUuid(value) {
     return typeof value === "string" && UUID_RE.test(value.trim());
 }
+const mediaSourceOptions = [
+    { name: "None (text-only post)", value: "none" },
+    { name: "URL (paste https:// links)", value: "url" },
+    { name: "Binary Data (from n8n node)", value: "binary" },
+    { name: "Media File ID (UUIDs from Upload)", value: "mediafileid" },
+];
+const storyMediaSourceOptions = mediaSourceOptions.filter((option) => option.value !== "none");
+const mediaSourceDescription = "How to attach media to the post:\n" +
+    "• URL — paste direct links (https://…)\n" +
+    "• Binary Property — use binary data from a previous n8n node\n" +
+    "• Media File ID — use UUIDs returned by a previous Media → Upload step";
 async function readBinaryOrThrow(ctx, itemIndex, propertyName) {
     try {
         const binaryData = ctx.helpers.assertBinaryData(itemIndex, propertyName);
@@ -347,18 +358,43 @@ class Postora {
                     name: "mediaSource",
                     type: "options",
                     noDataExpression: true,
-                    options: [
-                        { name: "None (text-only post)", value: "none" },
-                        { name: "URL (paste https:// links)", value: "url" },
-                        { name: "Binary Data (from n8n node)", value: "binary" },
-                        { name: "Media File ID (UUIDs from Upload)", value: "mediafileid" },
-                    ],
+                    options: storyMediaSourceOptions,
+                    default: "url",
+                    displayOptions: {
+                        show: {
+                            resource: ["post"],
+                            operation: ["create"],
+                            platform: ["facebook", "instagram"],
+                            postType: ["story"],
+                        },
+                    },
+                    description: mediaSourceDescription,
+                },
+                {
+                    displayName: "Media Source",
+                    name: "mediaSource",
+                    type: "options",
+                    noDataExpression: true,
+                    options: mediaSourceOptions,
                     default: "none",
-                    displayOptions: { show: { resource: ["post"], operation: ["create"] } },
-                    description: "How to attach media to the post:\n" +
-                        "• URL — paste direct links (https://…)\n" +
-                        "• Binary Property — use binary data from a previous n8n node\n" +
-                        "• Media File ID — use UUIDs returned by a previous Media → Upload step",
+                    displayOptions: {
+                        show: { resource: ["post"], operation: ["create"], platform: ["facebook", "instagram"] },
+                        hide: { postType: ["story"] },
+                    },
+                    description: mediaSourceDescription,
+                },
+                {
+                    displayName: "Media Source",
+                    name: "mediaSource",
+                    type: "options",
+                    noDataExpression: true,
+                    options: mediaSourceOptions,
+                    default: "none",
+                    displayOptions: {
+                        show: { resource: ["post"], operation: ["create"] },
+                        hide: { platform: ["facebook", "instagram"] },
+                    },
+                    description: mediaSourceDescription,
                 },
                 {
                     displayName: "Media URLs",

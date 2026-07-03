@@ -55,6 +55,19 @@ async function run(overrides: Parameters<typeof makeExecute>[0]) {
 // ── Tests ────────────────────────────────────────────────────────────────
 
 describe("Postora node — Instagram/Facebook Story caption fix (regression)", () => {
+  it("does not offer text-only media source for Facebook/Instagram stories", () => {
+    const node = new Postora();
+    const storyMediaSource = node.description.properties.find(
+      (property: any) =>
+        property.name === "mediaSource" &&
+        property.displayOptions?.show?.platform?.includes("instagram") &&
+        property.displayOptions?.show?.postType?.includes("story"),
+    ) as any;
+
+    expect(storyMediaSource).toBeDefined();
+    expect(storyMediaSource.options.map((option: any) => option.value)).not.toContain("none");
+  });
+
   it("does not throw 'Could not get parameter' when caption is hidden (IG story)", async () => {
     // caption intentionally absent from params (hidden field → getNodeParameter returns fallback)
     const { result } = await run({
