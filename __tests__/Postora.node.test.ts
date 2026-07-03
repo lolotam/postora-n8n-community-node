@@ -239,6 +239,102 @@ describe("Postora node — Upload sources", () => {
   });
 });
 
+describe("Postora node — Media → Upload URL source SSRF protections", () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  function fakeResponse(opts: { status?: number; headers?: Record<string, string>; body?: string }): Response {
+    const status = opts.status ?? 200;
+    const headerMap = new Map(Object.entries(opts.headers || {}).map(([k, v]) => [k.toLowerCase(), v]));
+    return {
+      status,
+      ok: status >= 200 && status < 300,
+      headers: { get: (name: string) => headerMap.get(name.toLowerCase()) ?? null },
+      arrayBuffer: async () => new Uint8Array(Buffer.from(opts.body || "fake-bytes")).buffer,
+    } as any;
+  }
+
+  it("regression: never contacts the redirect target when it's a private host (previously the check was dead code)", async () => {
+    const requestedUrls: string[] = [];
+    global.fetch = jest.fn(async (url: any) => {
+      requestedUrls.push(String(url));
+      return fakeResponse({ status: 302, headers: { location: "http://169.254.169.254/latest/meta-data/" } });
+    }) as any;
+
+    const { result } = await run({
+      params: {
+        resource: "media",
+        operation: "upload",
+        uploadMediaSource: "url",
+        uploadMediaUrls: "http://example.com/redirect-me",
+      },
+    });
+
+    // Only the first hop was ever requested — the private redirect target was never fetched.
+    expect(requestedUrls).toEqual(["http://example.com/redirect-me"]);
+    expect(result[0].json.failed).toBe(1);
+    expect(result[0].json.results[0].error).toMatch(/not allowed/i);
+  });
+
+  it("rejects a direct private/loopback host without calling fetch at all", async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as any;
+
+    const { result } = await run({
+      params: {
+        resource: "media",
+        operation: "upload",
+        uploadMediaSource: "url",
+        uploadMediaUrls: "http://169.254.169.254/latest/meta-data/",
+      },
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result[0].json.failed).toBe(1);
+    expect(result[0].json.results[0].error).toMatch(/not allowed/i);
+  });
+
+  it("allows a public 169.x host that is not in the 169.254.0.0/16 link-local range", async () => {
+    global.fetch = jest.fn(async () =>
+      fakeResponse({ status: 200, headers: { "content-type": "image/png" } }),
+    ) as any;
+
+    const { result } = await run({
+      params: {
+        resource: "media",
+        operation: "upload",
+        uploadMediaSource: "url",
+        uploadMediaUrls: "http://169.45.12.3/photo.png",
+      },
+    });
+
+    expect(result[0].json.uploaded).toBe(1);
+    expect(result[0].json.failed).toBe(0);
+  });
+
+  it("downloads and uploads a normal public image URL with no redirects", async () => {
+    global.fetch = jest.fn(async () =>
+      fakeResponse({ status: 200, headers: { "content-type": "image/jpeg" } }),
+    ) as any;
+
+    const { result } = await run({
+      params: {
+        resource: "media",
+        operation: "upload",
+        uploadMediaSource: "url",
+        uploadMediaUrls: "https://example.com/photo.jpg",
+      },
+      http: () => ({ success: true, media_file_id: "m1" }),
+    });
+
+    expect(result[0].json.uploaded).toBe(1);
+    expect(result[0].json.failed).toBe(0);
+  });
+});
+
 describe("Postora node — output shape is identical across sources", () => {
   const shape = (o: any) => ({
     total: typeof o.total,

@@ -109,7 +109,7 @@ Default. Reads one or more binary properties produced by an upstream node and up
 
 ### Source 2 — URL (download from web)
 
-Downloads each URL on the n8n side and uploads the bytes to Postora. **SSRF-safe:** only `http`/`https` schemes; private/loopback/reserved hosts are rejected; 50 MB max; 30 s timeout; redirects followed up to a safe limit; the response `Content-Type` must be `image/*` or `video/*`.
+Downloads each URL on the n8n side and uploads the bytes to Postora. **SSRF-safe:** only `http`/`https` schemes; private/loopback/reserved hosts are rejected — including on every redirect hop, validated *before* it's followed (up to 5 hops); 50 MB max; 30 s timeout; the response `Content-Type` must be `image/*` or `video/*`.
 
 - **Media URLs:** one or more public URLs. Comma-separated, **or** use an expression returning an array:
 

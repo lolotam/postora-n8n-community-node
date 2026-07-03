@@ -111,9 +111,98 @@ async function readBinaryOrThrow(
   }
 }
 
+// Single source of truth for "is this host off-limits to fetch from" — applied to
+// the original URL AND to every redirect hop, since a hostname's safety can only be
+// judged once we know the concrete host being connected to.
+function isPrivateOrReservedHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+
+  if (
+    host === "localhost" ||
+    host === "0.0.0.0" ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal") ||
+    host.endsWith(".localhost")
+  ) {
+    return true;
+  }
+
+  const ipv4Match = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4Match) {
+    const oct = ipv4Match.slice(1, 5).map((n) => parseInt(n, 10));
+    if (oct.some((o) => o > 255)) return true; // malformed IP literal — reject fail-safe
+    const [a, b] = oct;
+    const isLoopback = a === 127;
+    const isLinkLocal = a === 169 && b === 254; // 169.254.0.0/16 only — not all of 169.0.0.0/8
+    const isPrivate =
+      a === 10 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      a === 0 ||
+      a >= 224; // 224+ = multicast/reserved
+    return isLoopback || isLinkLocal || isPrivate;
+  }
+
+  // ::1, fc00::/7 (fc/fd prefixes) etc.
+  return host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host === "[::1]";
+}
+
+const MAX_REDIRECTS = 5;
+
+// Follows redirects one hop at a time, validating the scheme and host of EVERY hop
+// before making that request — unlike `redirect: "follow"`, which would already have
+// contacted a private/internal target before any check on the final URL could run.
+async function fetchFollowingSafeRedirects(startUrl: string, timeoutMs: number): Promise<Response> {
+  let currentUrl = startUrl;
+
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    let parsed: URL;
+    try {
+      parsed = new URL(currentUrl);
+    } catch {
+      throw new Error(`'${currentUrl}' is not a valid URL.`);
+    }
+
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error(`'${currentUrl}' uses an unsupported scheme. Only http and https are allowed.`);
+    }
+    if (isPrivateOrReservedHost(parsed.hostname)) {
+      throw new Error(`URL host '${parsed.hostname}' is not allowed (private/loopback/reserved).`);
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    let res: Response;
+    try {
+      res = await fetch(currentUrl, {
+        method: "GET",
+        redirect: "manual",
+        signal: controller.signal,
+        headers: { "User-Agent": "Postora-n8n-node/1.1.10" },
+      });
+    } catch (err: any) {
+      throw new Error(`Failed to download '${currentUrl}': ${err?.message || String(err)}`);
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    const isRedirect = res.status >= 300 && res.status < 400;
+    const location = res.headers.get("location");
+    if (isRedirect && location) {
+      currentUrl = new URL(location, currentUrl).toString();
+      continue;
+    }
+
+    return res;
+  }
+
+  throw new Error(`'${startUrl}' redirected more than ${MAX_REDIRECTS} times.`);
+}
+
 // SSRF-safe download of a single media URL. Returns the raw buffer plus an inferred
 // filename and mime type. Rejects private/loopback hosts, non-http(s) schemes,
-// oversized or wrong-content-type responses, and follows redirects up to a limit.
+// oversized or wrong-content-type responses. Every redirect hop is validated before
+// it's followed, so a private/internal target is never actually contacted.
 async function safeFetchAndStage(
   url: string,
 ): Promise<{ buffer: Buffer; fileName: string; mimeType: string }> {
@@ -124,86 +213,11 @@ async function safeFetchAndStage(
     throw new Error(`'${url}' is not a valid URL.`);
   }
 
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error(`'${url}' uses an unsupported scheme. Only http and https are allowed.`);
-  }
-
-  const host = parsed.hostname.toLowerCase();
-
-  // Reject obvious loopback / private / link-local / reserved addresses before we
-  // ever do a DNS lookup. This catches literal IPs and the well-known private
-  // names; runtime DNS-rebinding is out of scope for a self-hosted n8n node.
-  if (
-    host === "localhost" ||
-    host === "0.0.0.0" ||
-    host.endsWith(".local") ||
-    host.endsWith(".internal") ||
-    host.endsWith(".localhost")
-  ) {
-    throw new Error(`URL host '${host}' is not allowed (private/local).`);
-  }
-
-  const ipv4Match = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (ipv4Match) {
-    const oct = ipv4Match.slice(1, 5).map((n) => parseInt(n, 10));
-    if (oct.some((o) => o > 255)) {
-      throw new Error(`URL host '${host}' is not a valid IP address.`);
-    }
-    const [a, b] = oct;
-    const isLoopback = a === 127;
-    const isPrivate =
-      a === 10 ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      a === 0 ||
-      a === 169 ||
-      a >= 224; // 224+ = multicast/reserved
-    if (isLoopback || isPrivate) {
-      throw new Error(`URL host '${host}' resolves to a private/loopback/reserved range.`);
-    }
-  }
-
-  // ://[::1] etc.
-  if (host.includes(":") && (host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host === "[::1]")) {
-    throw new Error(`URL host '${host}' is an IPv6 loopback/private address.`);
-  }
-
   const MAX_BYTES = 50 * 1024 * 1024; // 50 MB
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
-
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: "GET",
-      redirect: "follow",
-      signal: controller.signal,
-      headers: { "User-Agent": "Postora-n8n-node/1.1.7" },
-    });
-  } catch (err: any) {
-    throw new Error(`Failed to download '${url}': ${err?.message || String(err)}`);
-  } finally {
-    clearTimeout(timeout);
-  }
+  const res = await fetchFollowingSafeRedirects(url, 30_000);
 
   if (!res.ok) {
     throw new Error(`Download of '${url}' failed with HTTP ${res.status}.`);
-  }
-
-  // Followed redirects — re-check the final URL host for safety.
-  try {
-    const finalHost = new URL(res.url).hostname.toLowerCase();
-    if (
-      finalHost === "localhost" ||
-      finalHost === "0.0.0.0" ||
-      finalHost.endsWith(".local") ||
-      finalHost.endsWith(".internal") ||
-      finalHost.endsWith(".localhost")
-    ) {
-      throw new Error(`Redirect landed on a private host '${finalHost}'.`);
-    }
-  } catch {
-    // res.url parse failure is non-fatal
   }
 
   const contentType = (res.headers.get("content-type") || "").toLowerCase();
