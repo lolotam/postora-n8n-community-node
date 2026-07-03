@@ -86,6 +86,22 @@ describe("Postora node — Instagram/Facebook Story caption fix (regression)", (
       }),
     ).rejects.toThrow(/Required parameter 'Social Accounts/i);
   });
+
+  it("throws a clear error when Media File ID source receives a URL", async () => {
+    await expect(
+      run({
+        params: {
+          resource: "post",
+          operation: "create",
+          platform: "instagram",
+          socialAccounts_instagram: ["acc-1"],
+          mediaSource: "mediafileid",
+          mediaFileIds: "https://res.cloudinary.com/demo/image/upload/file.png",
+          postType: "story",
+        },
+      }),
+    ).rejects.toThrow(/Invalid Media File ID.*looks like a URL/i);
+  });
 });
 
 describe("Postora node — Media → Upload backward compat (legacy binaryPropertyName)", () => {

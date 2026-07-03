@@ -401,14 +401,18 @@ export class Postora implements INodeType {
         type: "options",
         noDataExpression: true,
         options: [
-          { name: "None", value: "none" },
-          { name: "URL", value: "url" },
-          { name: "Binary Data", value: "binary" },
-          { name: "Media File ID", value: "mediafileid" },
+          { name: "None (text-only post)", value: "none" },
+          { name: "URL (paste https:// links)", value: "url" },
+          { name: "Binary Data (from n8n node)", value: "binary" },
+          { name: "Media File ID (UUIDs from Upload)", value: "mediafileid" },
         ],
         default: "none",
         displayOptions: { show: { resource: ["post"], operation: ["create"] } },
-        description: "How to attach media to the post",
+        description:
+          "How to attach media to the post:\n" +
+          "• URL — paste direct links (https://…)\n" +
+          "• Binary Property — use binary data from a previous n8n node\n" +
+          "• Media File ID — use UUIDs returned by a previous Media → Upload step",
       },
       {
         displayName: "Media URLs",
@@ -417,7 +421,8 @@ export class Postora implements INodeType {
         default: "",
         displayOptions: { show: { resource: ["post"], operation: ["create"], mediaSource: ["url"] } },
         description:
-          "Comma-separated media URLs (images or videos). The API will download and attach them to the post.",
+          "🔗 Comma-separated direct media URLs (https://…). The API will download each file and attach it to the post. " +
+          "Only use this option when you have public links to image/video files.",
       },
       {
         displayName: "Binary Property",
@@ -435,8 +440,9 @@ export class Postora implements INodeType {
         default: "",
         displayOptions: { show: { resource: ["post"], operation: ["create"], mediaSource: ["mediafileid"] } },
         description:
-          "One or more media file IDs previously returned by Media → Upload. Comma-separated for multiple files " +
-          "(e.g. id-1,id-2,id-3) — the surrounding [ ] brackets are optional and stripped automatically.",
+          "🆔 UUIDs returned by a previous Media → Upload step (e.g. 7ee95777-b5fa-41a3-b314-5d67a027e569). " +
+          "Comma-separated for multiple. ⚠️ Do NOT paste URLs here — use the 'URL' source instead.\n" +
+          "Tip: in an expression, reference the 'id' field (UUID), NOT 'file_path' (which is a Cloudinary URL).",
       },
       {
         displayName: "Schedule At",
@@ -774,9 +780,9 @@ export class Postora implements INodeType {
         name: "uploadMediaSource",
         type: "options",
         options: [
-          { name: "Binary Property (n8n file)", value: "binary" },
-          { name: "URL (download from web)", value: "url" },
-          { name: "Media File ID (look up & re-attach)", value: "mediafileid" },
+          { name: "Binary Property (from n8n node)", value: "binary" },
+          { name: "URL (download from https://)", value: "url" },
+          { name: "Media File ID (UUID lookup, no re-upload)", value: "mediafileid" },
         ],
         default: "binary",
         displayOptions: { show: { resource: ["media"], operation: ["upload"] } },
@@ -802,7 +808,7 @@ export class Postora implements INodeType {
         typeOptions: { multipleValues: false },
         displayOptions: { show: { resource: ["media"], operation: ["upload"], uploadMediaSource: ["url"] } },
         description:
-          "One or more public URLs (http/https only) to download media from. Comma-separated, or use an expression returning an array (e.g. ={{ $json.urls }}).",
+          "🔗 One or more public URLs (http/https only) to download media from. Comma-separated, or use an expression returning an array (e.g. ={{ $json.urls }}).",
       },
       {
         displayName: "Media File ID(s)",
@@ -811,7 +817,8 @@ export class Postora implements INodeType {
         default: "",
         displayOptions: { show: { resource: ["media"], operation: ["upload"], uploadMediaSource: ["mediafileid"] } },
         description:
-          "Postora media file UUID(s) to look up and re-attach. Comma-separated, or use an expression returning an array (e.g. ={{ $json.file_ids }}). Invalid or not-owned IDs are reported as failures but never crash the node.",
+          "🆔 Postora media file UUID(s) to look up and re-attach. Comma-separated, or use an expression returning an array (e.g. ={{ $json.file_ids }}). " +
+          "⚠️ Do NOT paste URLs here — use the 'URL' source instead. Invalid or not-owned IDs are reported as failures but never crash the node.",
       },
     ],
   };
@@ -985,6 +992,20 @@ export class Postora implements INodeType {
               "Media source is set to Media File ID but no IDs were provided. " +
               "Enter one or more IDs returned by a previous Media → Upload step, comma-separated (e.g. id-1,id-2,id-3)."
             );
+          }
+
+          if (mediaSource === "mediafileid" && mediaFileIds.length > 0) {
+            const invalid = mediaFileIds.filter((id) => !isValidUuid(id));
+            if (invalid.length > 0) {
+              const sample = invalid[0];
+              const isUrl = /^https?:\/\//i.test(sample);
+              throw new Error(
+                `Invalid Media File ID: "${String(sample).slice(0, 80)}" is not a valid UUID.` +
+                (isUrl
+                  ? " It looks like a URL — switch Media Source to \"URL\", or use the Media → Upload node first and reference the returned 'id' (a UUID like 7ee95777-...) instead of 'file_path' (the Cloudinary URL)."
+                  : " Media File IDs are UUIDs returned by the Media → Upload node (e.g. 7ee95777-b5fa-41a3-b314-5d67a027e569)."),
+              );
+            }
           }
           const scheduledAt = this.getNodeParameter("scheduledAt", i, "") as string;
           const additionalOptions = this.getNodeParameter("additionalOptions", i, {}) as Record<string, any>;
