@@ -31,6 +31,46 @@ function makeExecute(overrides: {
         callLog.push(opts);
         return httpImpl(opts);
       },
+      httpRequest: async function (opts: any) {
+        const res = await fetch(opts.url, {
+          method: opts.method || "GET",
+          headers: opts.headers,
+          redirect: opts.disableFollowRedirect ? "manual" : "follow",
+        });
+
+        if (opts.returnFullResponse) {
+          const arrayBuffer = await res.arrayBuffer();
+          const headers: Record<string, string> = {};
+          if (res.headers && typeof res.headers.forEach === "function") {
+            res.headers.forEach((val, key) => {
+              headers[key] = val;
+            });
+          } else if (res.headers && (res.headers as any).raw) {
+            const raw = (res.headers as any).raw();
+            for (const [k, v] of Object.entries(raw)) {
+              headers[k] = Array.isArray(v) ? v[0] : String(v);
+            }
+          } else {
+            if (res.headers && typeof res.headers.get === "function") {
+              for (const h of ["location", "content-type", "content-length", "content-disposition"]) {
+                const val = res.headers.get(h);
+                if (val !== null) headers[h] = val;
+              }
+            }
+          }
+          return {
+            statusCode: res.status,
+            headers,
+            body: Buffer.from(arrayBuffer),
+          };
+        }
+
+        if (opts.encoding === "arraybuffer") {
+          const arrayBuffer = await res.arrayBuffer();
+          return Buffer.from(arrayBuffer);
+        }
+        return res.json();
+      },
       assertBinaryData: (_i: number, prop: string) => {
         const b = binaryData[prop];
         if (!b) throw new Error(`no binary data on ${prop}`);
