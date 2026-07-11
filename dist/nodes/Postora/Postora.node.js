@@ -117,7 +117,7 @@ const MAX_REDIRECTS = 5;
 // Follows redirects one hop at a time, validating the scheme and host of EVERY hop
 // before making that request — unlike `redirect: "follow"`, which would already have
 // contacted a private/internal target before any check on the final URL could run.
-async function fetchFollowingSafeRedirects(startUrl, timeoutMs) {
+async function fetchFollowingSafeRedirects(ctx, startUrl, timeoutMs) {
     let currentUrl = startUrl;
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
         let parsed;
@@ -133,30 +133,34 @@ async function fetchFollowingSafeRedirects(startUrl, timeoutMs) {
         if (isPrivateOrReservedHost(parsed.hostname)) {
             throw new Error(`URL host '${parsed.hostname}' is not allowed (private/loopback/reserved).`);
         }
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), timeoutMs);
         let res;
         try {
-            res = await fetch(currentUrl, {
+            res = await ctx.helpers.httpRequest({
                 method: "GET",
-                redirect: "manual",
-                signal: controller.signal,
-                headers: { "User-Agent": "Postora-n8n-node/1.1.10" },
+                url: currentUrl,
+                headers: { "User-Agent": "Postora-n8n-node/1.1.12" },
+                disableFollowRedirect: true,
+                ignoreHttpStatusErrors: true,
+                returnFullResponse: true,
+                encoding: "arraybuffer",
+                timeout: timeoutMs,
             });
         }
         catch (err) {
             throw new Error(`Failed to download '${currentUrl}': ${err?.message || String(err)}`);
         }
-        finally {
-            clearTimeout(timeout);
-        }
-        const isRedirect = res.status >= 300 && res.status < 400;
-        const location = res.headers.get("location");
+        const statusCode = res.statusCode || 200;
+        const isRedirect = statusCode >= 300 && statusCode < 400;
+        const location = res.headers?.location || res.headers?.Location;
         if (isRedirect && location) {
             currentUrl = new URL(location, currentUrl).toString();
             continue;
         }
-        return res;
+        return {
+            statusCode,
+            headers: res.headers || {},
+            body: res.body,
+        };
     }
     throw new Error(`'${startUrl}' redirected more than ${MAX_REDIRECTS} times.`);
 }
@@ -164,7 +168,7 @@ async function fetchFollowingSafeRedirects(startUrl, timeoutMs) {
 // filename and mime type. Rejects private/loopback hosts, non-http(s) schemes,
 // oversized or wrong-content-type responses. Every redirect hop is validated before
 // it's followed, so a private/internal target is never actually contacted.
-async function safeFetchAndStage(url) {
+async function safeFetchAndStage(ctx, url) {
     let parsed;
     try {
         parsed = new URL(url);
@@ -173,26 +177,29 @@ async function safeFetchAndStage(url) {
         throw new Error(`'${url}' is not a valid URL.`);
     }
     const MAX_BYTES = 50 * 1024 * 1024; // 50 MB
-    const res = await fetchFollowingSafeRedirects(url, 30_000);
-    if (!res.ok) {
-        throw new Error(`Download of '${url}' failed with HTTP ${res.status}.`);
+    const res = await fetchFollowingSafeRedirects(ctx, url, 30_000);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+        throw new Error(`Download of '${url}' failed with HTTP ${res.statusCode}.`);
     }
-    const contentType = (res.headers.get("content-type") || "").toLowerCase();
+    const headers = Object.keys(res.headers).reduce((acc, key) => {
+        acc[key.toLowerCase()] = String(res.headers[key]);
+        return acc;
+    }, {});
+    const contentType = (headers["content-type"] || "").toLowerCase();
     if (!contentType.startsWith("image/") && !contentType.startsWith("video/")) {
         throw new Error(`'${url}' returned Content-Type '${contentType || "(none)"}'. Only image/* and video/* are accepted.`);
     }
-    const contentLength = parseInt(res.headers.get("content-length") || "0", 10);
+    const contentLength = parseInt(headers["content-length"] || "0", 10);
     if (contentLength && contentLength > MAX_BYTES) {
         throw new Error(`'${url}' is too large (${contentLength} bytes > ${MAX_BYTES} byte limit).`);
     }
-    const arrayBuf = await res.arrayBuffer();
-    const buffer = Buffer.from(arrayBuf);
+    const buffer = res.body;
     if (buffer.byteLength > MAX_BYTES) {
         throw new Error(`'${url}' exceeded the ${MAX_BYTES}-byte download limit during transfer.`);
     }
     // Filename: Content-Disposition → URL basename → fallback by mime
     let fileName = "upload";
-    const cd = res.headers.get("content-disposition") || "";
+    const cd = headers["content-disposition"] || "";
     const cdMatch = cd.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)/i);
     if (cdMatch && cdMatch[1]) {
         fileName = decodeURIComponent(cdMatch[1].trim());
@@ -1033,6 +1040,26 @@ class Postora {
                         body,
                         json: true,
                     });
+                    // The create endpoint returns the original pending row after processing.
+                    // Fetch the status record so immediate posts expose per-platform post URLs.
+                    if (!responseData?.scheduled && responseData?.post?.id) {
+                        try {
+                            const statusResponse = await this.helpers.httpRequestWithAuthentication.call(this, "postoraApi", {
+                                method: "GET",
+                                url: `${baseUrl}/api/v1/post/${responseData.post.id}`,
+                                json: true,
+                            });
+                            if (statusResponse?.post) {
+                                responseData = { ...responseData, post: statusResponse.post };
+                            }
+                        }
+                        catch (error) {
+                            responseData = {
+                                ...responseData,
+                                post_status_lookup_error: error?.message || String(error),
+                            };
+                        }
+                    }
                 }
                 // ── Post → Get Status ──
                 else if (resource === "post" && operation === "getStatus") {
@@ -1126,7 +1153,7 @@ class Postora {
                         }
                         for (const url of urls) {
                             try {
-                                const fetched = await safeFetchAndStage(url);
+                                const fetched = await safeFetchAndStage(this, url);
                                 const boundary = "----n8nFormBoundary" + Math.random().toString(36).substring(2);
                                 const header = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fetched.fileName}"\r\nContent-Type: ${fetched.mimeType}\r\n\r\n`);
                                 const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
