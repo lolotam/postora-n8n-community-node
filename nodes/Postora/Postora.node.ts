@@ -325,6 +325,7 @@ export class Postora implements INodeType {
           { name: "Account", value: "account" },
           { name: "Media", value: "media" },
           { name: "Post", value: "post" },
+          { name: "Webhook", value: "webhook" },
         ],
         default: "post",
       },
@@ -356,8 +357,27 @@ export class Postora implements INodeType {
         type: "options",
         noDataExpression: true,
         displayOptions: { show: { resource: ["media"] } },
-        options: [{ name: "Upload", value: "upload", description: "Upload a media file", action: "Upload media" }],
+        options: [
+          { name: "Upload", value: "upload", description: "Upload a media file", action: "Upload media" },
+          { name: "Get", value: "get", description: "Get a media file by ID", action: "Get media" },
+        ],
         default: "upload",
+      },
+
+      // ── Webhook Operations ──
+      {
+        displayName: "Operation",
+        name: "operation",
+        type: "options",
+        noDataExpression: true,
+        displayOptions: { show: { resource: ["webhook"] } },
+        options: [
+          { name: "Register", value: "register", description: "Register a webhook", action: "Register a webhook" },
+          { name: "List", value: "list", description: "List registered webhooks", action: "List webhooks" },
+          { name: "Test", value: "test", description: "Test a webhook URL", action: "Test a webhook" },
+          { name: "Delete", value: "delete", description: "Delete a webhook", action: "Delete a webhook" },
+        ],
+        default: "register",
       },
 
       // ── Account Operations ──
@@ -898,6 +918,51 @@ export class Postora implements INodeType {
           "🆔 Postora media file UUID(s) to look up and re-attach. Comma-separated, or use an expression returning an array (e.g. ={{ $json.file_ids }}). " +
           "⚠️ Do NOT paste URLs here — use the 'URL' source instead. Invalid or not-owned IDs are reported as failures but never crash the node.",
       },
+      {
+        displayName: "Media ID",
+        name: "mediaId",
+        type: "string",
+        default: "",
+        required: true,
+        displayOptions: { show: { resource: ["media"], operation: ["get"] } },
+        description: "The UUID returned by a previous Media → Upload step",
+      },
+
+      // ═══════════════════════════════════
+      // Webhook fields
+      // ═══════════════════════════════════
+      {
+        displayName: "Webhook URL",
+        name: "webhookUrl",
+        type: "string",
+        default: "",
+        required: true,
+        displayOptions: { show: { resource: ["webhook"], operation: ["register", "test"] } },
+        description: "The public HTTPS URL that receives Postora webhook events",
+      },
+      {
+        displayName: "Events",
+        name: "webhookEvents",
+        type: "multiOptions",
+        options: [
+          { name: "Post Completed", value: "post.completed" },
+          { name: "Post Failed", value: "post.failed" },
+          { name: "Post Published", value: "post.published" },
+          { name: "All Events", value: "*" },
+        ],
+        default: [],
+        displayOptions: { show: { resource: ["webhook"], operation: ["register"] } },
+        description: "Optional events to deliver. Leave empty to use the API default.",
+      },
+      {
+        displayName: "Webhook ID",
+        name: "webhookId",
+        type: "string",
+        default: "",
+        required: true,
+        displayOptions: { show: { resource: ["webhook"], operation: ["delete"] } },
+        description: "The ID of the webhook to delete",
+      },
     ],
   };
 
@@ -993,6 +1058,66 @@ export class Postora implements INodeType {
             {
               method: "GET",
               url: `${baseUrl}/api/v1/accounts`,
+              json: true,
+            },
+          );
+        }
+
+        // ── Webhook → Register ──
+        else if (resource === "webhook" && operation === "register") {
+          const webhookUrl = requireParam(this.getNodeParameter("webhookUrl", i, "") as string, "Webhook URL");
+          const webhookEvents = this.getNodeParameter("webhookEvents", i, []) as string[];
+          const webhookBody: Record<string, string | string[]> = { webhook_url: webhookUrl };
+          if (webhookEvents.length > 0) webhookBody.events = webhookEvents;
+          responseData = await this.helpers.httpRequestWithAuthentication.call(
+            this as unknown as IAllExecuteFunctions,
+            "postoraApi",
+            {
+              method: "POST",
+              url: `${baseUrl}/api/v1/webhooks`,
+              body: webhookBody,
+              json: true,
+            },
+          );
+        }
+
+        // ── Webhook → List ──
+        else if (resource === "webhook" && operation === "list") {
+          responseData = await this.helpers.httpRequestWithAuthentication.call(
+            this as unknown as IAllExecuteFunctions,
+            "postoraApi",
+            {
+              method: "GET",
+              url: `${baseUrl}/api/v1/webhooks`,
+              json: true,
+            },
+          );
+        }
+
+        // ── Webhook → Test ──
+        else if (resource === "webhook" && operation === "test") {
+          const webhookUrl = requireParam(this.getNodeParameter("webhookUrl", i, "") as string, "Webhook URL");
+          responseData = await this.helpers.httpRequestWithAuthentication.call(
+            this as unknown as IAllExecuteFunctions,
+            "postoraApi",
+            {
+              method: "POST",
+              url: `${baseUrl}/api/v1/webhooks/test`,
+              body: { webhook_url: webhookUrl },
+              json: true,
+            },
+          );
+        }
+
+        // ── Webhook → Delete ──
+        else if (resource === "webhook" && operation === "delete") {
+          const webhookId = requireParam(this.getNodeParameter("webhookId", i, "") as string, "Webhook ID");
+          responseData = await this.helpers.httpRequestWithAuthentication.call(
+            this as unknown as IAllExecuteFunctions,
+            "postoraApi",
+            {
+              method: "DELETE",
+              url: `${baseUrl}/api/v1/webhooks/${webhookId}`,
               json: true,
             },
           );
@@ -1222,6 +1347,23 @@ export class Postora implements INodeType {
             {
               method: "GET",
               url,
+              json: true,
+            },
+          );
+        }
+
+        // ── Media → Get ──
+        else if (resource === "media" && operation === "get") {
+          const mediaId = requireParam(this.getNodeParameter("mediaId", i, "") as string, "Media ID");
+          if (!isValidUuid(mediaId)) {
+            throw new Error("Invalid Media ID. Media IDs must be valid UUIDs returned by a previous Media → Upload step.");
+          }
+          responseData = await this.helpers.httpRequestWithAuthentication.call(
+            this as unknown as IAllExecuteFunctions,
+            "postoraApi",
+            {
+              method: "GET",
+              url: `${baseUrl}/api/v1/media/${mediaId}`,
               json: true,
             },
           );
