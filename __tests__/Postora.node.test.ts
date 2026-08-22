@@ -876,6 +876,81 @@ describe("Postora node — Comment → Delete platform guard", () => {
   });
 });
 
+// Production incident, 2026-08-23: a Threads Comment Reply failed with "Param reply_to_id is
+// not a valid threads_media ID" after the request had already reached Threads. The comment id
+// came from left-over test data, and nothing checked its shape before the reply went out.
+describe("Postora node — Comment → Reply Threads comment ID guard", () => {
+  const THREADS_ACCOUNT = "b7c8d9e0-2222-4333-9444-555566667777";
+
+  it.each([
+    ["left-over test data", "test_live_1787438479"],
+    ["a Facebook comment ID", "122094347829445481_1792110005145068"],
+  ])("refuses %s before any request goes out", async (_label, commentId) => {
+    const requestsSent: string[] = [];
+
+    await expect(
+      run({
+        params: {
+          resource: "comment",
+          operation: "reply",
+          commentPlatform: "threads",
+          commentSocialAccountId: THREADS_ACCOUNT,
+          commentId,
+          commentMessage: "hi",
+        },
+        http: (options: any) => {
+          requestsSent.push(options.url);
+          return {};
+        },
+      }),
+    ).rejects.toThrow(/not a Threads comment ID/);
+
+    expect(requestsSent).toEqual([]);
+  });
+
+  it("sends a digits-only Threads media ID through untouched", async () => {
+    let sentBody: any;
+
+    await run({
+      params: {
+        resource: "comment",
+        operation: "reply",
+        commentPlatform: "threads",
+        commentSocialAccountId: THREADS_ACCOUNT,
+        commentId: "17875366935604207",
+        commentMessage: "hi",
+      },
+      http: (options: any) => {
+        sentBody = options.body;
+        return { success: true };
+      },
+    });
+
+    expect(sentBody.comment_id).toBe("17875366935604207");
+  });
+
+  it("leaves a Facebook comment ID alone, since only Threads requires digits", async () => {
+    let sentBody: any;
+
+    await run({
+      params: {
+        resource: "comment",
+        operation: "reply",
+        commentPlatform: "facebook",
+        commentSocialAccountId: THREADS_ACCOUNT,
+        commentId: "122094347829445481_1792110005145068",
+        commentMessage: "hi",
+      },
+      http: (options: any) => {
+        sentBody = options.body;
+        return { success: true };
+      },
+    });
+
+    expect(sentBody.comment_id).toBe("122094347829445481_1792110005145068");
+  });
+});
+
 // Production incident, 2026-08-22: a Comment Trigger → AI Agent → Comment Reply workflow
 // failed with "Required parameter 'Social Account ID' is missing or empty" on a field that
 // visibly contained an expression. `$json` is the AI Agent's output, not the trigger's, so

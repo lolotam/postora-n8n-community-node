@@ -38,20 +38,29 @@ Follow the [installation guide](https://docs.n8n.io/integrations/community-nodes
 ### Postora Trigger
 Starts a workflow when Postora sends a selected event. n8n registers and removes the callback automatically when the workflow is activated or deactivated.
 
-Selectable events:
-- **Post Completed** (`post.completed`) — a post finished publishing.
-- **New Message Received (All Platforms)** (`message.received`) — an inbound message on any messaging platform.
-- **WhatsApp Message Received** (`message.whatsapp`)
-- **Instagram DM Received** (`message.instagram`)
-- **Facebook Message Received** (`message.facebook`)
-- **New Comment Received (All Platforms)** (`comment.received`) — Facebook/Instagram comments and replies, Threads replies and mentions.
-- **Facebook Comment Received** (`comment.facebook`)
-- **Instagram Comment Received** (`comment.instagram`)
-- **Threads Reply / Mention Received** (`comment.threads`)
-- **Threads Mention Created (legacy payload)** (`threads.mention.created`)
-- **Threads Mention Replied (legacy payload)** (`threads.mention.replied`)
+Since v1.5.0 the node asks for an **Event Category** first, then the platforms inside it:
 
-Selecting **New Message Received (All Platforms)** or **New Comment Received (All Platforms)** matches all platforms, so you do not also need the per-platform events.
+| Event Category | Platform selector |
+|---|---|
+| **Post Completed** | none — the category is the subscription (`post.completed`) |
+| **Message Received** | All Platforms (`message.received`), WhatsApp (`message.whatsapp`), Facebook (`message.facebook`), Instagram (`message.instagram`) |
+| **Comment Received** | All Platforms (`comment.received`), Facebook (`comment.facebook`), Instagram (`comment.instagram`), Threads (`comment.threads`) |
+
+Pick several categories at once and the subscription is the union of everything selected.
+Selecting **All Platforms** matches every platform in that category, so you do not also need the
+per-platform entries.
+
+**Threads is not offered under Message Received, and WhatsApp is not offered under Comment
+Received** — Postora never emits a Threads direct message or a WhatsApp public comment, so those
+pairings could only produce a subscription that never fires. A Threads reply or mention arrives as
+`comment.received` with `platform: "threads"`; read `comment.kind` to tell a reply from a mention.
+
+The two legacy mention events (`threads.mention.created`, `threads.mention.replied`) moved to
+**Postora Comment Trigger**, which is now their only home. Workflows already subscribed to them
+keep receiving them — Postora matches against the subscription it stored, not against this list.
+
+Workflows saved before v1.5.0 stay on node version 1 and keep their original flat **Events**
+selection untouched. Only newly added Postora Trigger nodes get the category UI.
 
 Every `message.*` event carries the same body, so one workflow can serve several connected accounts:
 
@@ -86,7 +95,7 @@ workflows for more than one Postora tenant on one n8n instance, give each its ow
 keep each reply node on the trigger that matches it. Run **Account → List** with a credential to
 see the UUIDs it can send from.
 
-Changing the **Events** selection takes effect the next time the workflow is activated: on activation the node compares its selection against the subscription registered with Postora and re-registers when they differ. Before v1.2.1 the original subscription was kept regardless, so an edited selection was silently ignored — if you edited Events on an already-active workflow under an older version, deactivate and reactivate it once after upgrading.
+Changing the event selection takes effect the next time the workflow is activated: on activation the node compares its selection against the subscription registered with Postora and re-registers when they differ. Before v1.2.1 the original subscription was kept regardless, so an edited selection was silently ignored — if you edited the selection on an already-active workflow under an older version, deactivate and reactivate it once after upgrading.
 
 ### Comment
 - **Reply** — Reply to a comment, reply, or mention (Facebook, Instagram, Threads)
@@ -110,6 +119,12 @@ On Auto-detect the node reads the incoming `platform` field where it can, purely
 aimed at Threads fails immediately with "Use the Hide operation instead" rather than after a round
 trip. When it cannot read one — an AI Agent in between with a renamed trigger, for instance — the
 API's own Threads guard still refuses the delete.
+
+Since v1.5.0, when the platform resolves to Threads the node also checks the shape of **Comment
+ID** before sending. Threads IDs are digits only (`17875366935604207`), so a Facebook comment ID
+(`postid_commentid`) or left-over pinned test data now fails in the node naming the mistake,
+instead of reaching Threads and coming back as
+`Param reply_to_id is not a valid threads_media ID`.
 
 The field defaults read a **Postora Comment Trigger** payload, falling back to the trigger by
 name when `$json` is not the trigger's output:
@@ -145,11 +160,18 @@ reply, or mention arrives on a connected Facebook, Instagram, or Threads account
 |---|---|
 | **Platform** | All, Facebook, Instagram, or Threads |
 | **Account** | Loaded from your connected accounts and filtered by Platform. "All accounts" applies no account filter |
-| **Events** | `comment.received` (default). Threads replies and mentions arrive as `comment.received` with `comment.kind` set to `reply` or `mention` |
+| **Events** | `comment.received` (default), plus `threads.mention.created` and `threads.mention.replied` for the legacy mention payload. Threads replies and mentions also arrive as `comment.received` with `comment.kind` set to `reply` or `mention` |
 
 **Prerequisite — the trigger receives nothing without it:** in Postora, open the platform's
 Messaging page → **Auto Replies** → **Automation**, and set **Comments** to **n8n** for that
 account. Registering the trigger alone does not start delivery.
+
+**Threads needs one more step, done once per Meta app, not in n8n.** Threads has no per-account
+webhook subscription, so nothing reaches Postora until the app itself is subscribed: Meta App
+Dashboard → the Threads use case → **Webhooks**, set the callback URL to your Postora deployment's
+`/functions/v1/threads-webhook`, verify it, and subscribe **both** the `mentions` and `replies`
+fields. Subscribing `mentions` alone delivers mentions only; direct replies to your own posts
+arrive on `replies`.
 
 Comments authored by the connected account itself are never delivered. Without that
 suppression an auto-reply workflow would receive its own reply as a new comment and answer

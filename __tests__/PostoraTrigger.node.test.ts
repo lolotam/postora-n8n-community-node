@@ -15,6 +15,10 @@ function createHookContext(overrides: {
   webhookResponse?: unknown;
   callbackUrl?: string | undefined;
   events?: string[];
+  typeVersion?: number;
+  eventCategories?: string[];
+  messageEvents?: string[];
+  commentEvents?: string[];
   listing?: RegisteredWebhook[];
   listingError?: Error;
   deleteError?: Error;
@@ -25,7 +29,20 @@ function createHookContext(overrides: {
   return {
     context: {
       getCredentials: async () => ({ baseUrl: "https://api.example.test" }),
-      getNodeParameter: () => overrides.events ?? ["post.completed"],
+      getNode: () => ({ typeVersion: overrides.typeVersion ?? 1 }),
+      // Mirrors n8n: a parameter the node never stored is answered with the caller's
+      // fallback, and asking for one without a fallback is an error.
+      getNodeParameter: (name: string, fallbackValue?: unknown) => {
+        const stored: Record<string, unknown> = {
+          eventCategories: overrides.eventCategories,
+          messageEvents: overrides.messageEvents,
+          commentEvents: overrides.commentEvents,
+          events: overrides.events ?? (overrides.typeVersion === 2 ? undefined : ["post.completed"]),
+        };
+        const value = stored[name] ?? fallbackValue;
+        if (value === undefined) throw new Error(`Could not get parameter "${name}"`);
+        return value;
+      },
       getNodeWebhookUrl: () => (
         "callbackUrl" in overrides ? overrides.callbackUrl : CALLBACK_URL
       ),
@@ -50,22 +67,24 @@ function createHookContext(overrides: {
 }
 
 describe("Postora Trigger", () => {
-  it("offers the messaging and comment trigger events alongside post.completed", () => {
+  it("lists exactly the nine triggers the n8n side panel should offer, in order", () => {
+    // n8n builds that panel from the first property named "Events" and shows one entry per
+    // option, so this list is the panel. The legacy threads.mention.* pair lives on the
+    // Postora Comment Trigger only; duplicating it here is what made the panel read as if
+    // the same trigger were listed twice.
     const trigger = new PostoraTrigger();
     const events = (trigger.description.properties?.find((property) => property.name === "events") as any).options;
 
-    expect(events.map((event: { value: string }) => event.value)).toEqual([
-      "post.completed",
-      "message.received",
-      "message.whatsapp",
-      "message.instagram",
-      "message.facebook",
-      "comment.received",
-      "comment.facebook",
-      "comment.instagram",
-      "comment.threads",
-      "threads.mention.created",
-      "threads.mention.replied",
+    expect(events.map((event: { value: string; action: string }) => [event.value, event.action])).toEqual([
+      ["post.completed", "Post Completed"],
+      ["message.received", "Message Received (All Platforms)"],
+      ["message.whatsapp", "Message Received (WhatsApp)"],
+      ["message.facebook", "Message Received (Facebook)"],
+      ["message.instagram", "Message Received (Instagram)"],
+      ["comment.received", "Comment Received (All Platforms)"],
+      ["comment.facebook", "Comment Received (Facebook)"],
+      ["comment.instagram", "Comment Received (Instagram)"],
+      ["comment.threads", "Comment Received (Threads)"],
     ]);
   });
 
@@ -269,5 +288,110 @@ describe("Postora Trigger", () => {
       workflowData: [[{ json: body }]],
       webhookResponse: { status: 200 },
     });
+  });
+});
+
+describe("Postora Trigger — version 2 Event Category", () => {
+  function optionValues(name: string): string[] {
+    const trigger = new PostoraTrigger();
+    const property = trigger.description.properties?.find((candidate) => candidate.name === name) as any;
+    return property.options.map((option: { value: string }) => option.value);
+  }
+
+  it("defaults new nodes to version 2 while still loading version 1 workflows", () => {
+    const trigger = new PostoraTrigger();
+
+    expect(trigger.description.version).toEqual([1, 2]);
+    expect(trigger.description.defaultVersion).toBe(2);
+  });
+
+  it("never offers Threads as a message platform or WhatsApp as a comment platform", () => {
+    // Postora emits Threads activity only as a comment envelope and WhatsApp has no public
+    // comments, so these pairings produce a subscription that can never fire.
+    expect(optionValues("messageEvents")).toEqual([
+      "message.received",
+      "message.whatsapp",
+      "message.instagram",
+      "message.facebook",
+    ]);
+    expect(optionValues("commentEvents")).toEqual([
+      "comment.received",
+      "comment.facebook",
+      "comment.instagram",
+      "comment.threads",
+    ]);
+  });
+
+  it.each([
+    ["post only", ["post"], ["post.completed"]],
+    ["message only", ["message"], ["message.whatsapp", "message.facebook"]],
+    ["comment only", ["comment"], ["comment.threads"]],
+    [
+      "several categories at once",
+      ["post", "message", "comment"],
+      ["post.completed", "message.whatsapp", "message.facebook", "comment.threads"],
+    ],
+  ])("registers the events belonging to the selected categories — %s", async (_label, eventCategories, expected) => {
+    const { context, requests } = createHookContext({
+      typeVersion: 2,
+      eventCategories: eventCategories as string[],
+      messageEvents: ["message.whatsapp", "message.facebook"],
+      commentEvents: ["comment.threads"],
+    });
+    const trigger = new PostoraTrigger();
+
+    await trigger.webhookMethods?.default?.create.call(context as any);
+
+    expect((requests[0].body as { events: string[] }).events).toEqual(expected);
+  });
+
+  it("registers the single event a triggers-panel click wrote into the hidden events field", async () => {
+    const { context, requests } = createHookContext({
+      typeVersion: 2,
+      eventCategories: [],
+      events: ["message.instagram"],
+    });
+    const trigger = new PostoraTrigger();
+
+    await trigger.webhookMethods?.default?.create.call(context as any);
+
+    expect((requests[0].body as { events: string[] }).events).toEqual(["message.instagram"]);
+  });
+
+  it("lets a chosen category replace what the triggers panel wrote rather than adding to it", async () => {
+    const { context, requests } = createHookContext({
+      typeVersion: 2,
+      eventCategories: ["comment"],
+      commentEvents: ["comment.threads"],
+      events: ["message.instagram"],
+    });
+    const trigger = new PostoraTrigger();
+
+    await trigger.webhookMethods?.default?.create.call(context as any);
+
+    expect((requests[0].body as { events: string[] }).events).toEqual(["comment.threads"]);
+  });
+
+  it("refuses to register a subscription that would receive nothing", async () => {
+    const { context, requests } = createHookContext({ typeVersion: 2, eventCategories: [], events: [] });
+    const trigger = new PostoraTrigger();
+
+    await expect(trigger.webhookMethods?.default?.create.call(context as any)).rejects.toThrow(
+      /at least one Event Category/,
+    );
+    expect(requests).toEqual([]);
+  });
+
+  it("keeps reading the flat events list for a workflow still on version 1", async () => {
+    const { context, requests } = createHookContext({
+      typeVersion: 1,
+      events: ["threads.mention.created"],
+      eventCategories: ["post"],
+    });
+    const trigger = new PostoraTrigger();
+
+    await trigger.webhookMethods?.default?.create.call(context as any);
+
+    expect((requests[0].body as { events: string[] }).events).toEqual(["threads.mention.created"]);
   });
 });

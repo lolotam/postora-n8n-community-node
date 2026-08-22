@@ -81,6 +81,17 @@ function requireAccountUuid(value, alsoNot) {
         `from the trigger payload — not the Instagram/Facebook numeric ID, not ${alsoNot}, and not the ` +
         `username. Run Resource = Account, Operation = List with this credential to see the UUIDs it can use.`);
 }
+// Threads media IDs are digits only ("17875366935604207"). Anything else — a Facebook comment ID
+// with its `postid_commentid` underscore, or pinned test data left over from a manual run — is
+// accepted by Postora and rejected by Threads as "Param reply_to_id is not a valid threads_media
+// ID" once the reply has already been published as far as the container step. Name it here.
+function requireThreadsMediaId(commentId) {
+    if (/^\d+$/.test(commentId))
+        return commentId;
+    throw new Error(`'${commentId}' is not a Threads comment ID. Threads IDs are digits only — use \`comment.id\` ` +
+        `from a Threads \`comment.received\` payload. A Facebook comment ID (postid_commentid) or ` +
+        `left-over test data cannot be replied to on Threads.`);
+}
 // Platform "Auto-Detect": the API resolves the platform from social_account_id on its own and
 // treats a supplied `platform` purely as a cross-check, so auto sends no platform at all. The
 // value read here is used only to decide whether the Threads-delete guard can fire locally —
@@ -1220,9 +1231,10 @@ class Postora {
                         throw new Error("Threads replies cannot be deleted. Use the Hide operation instead.");
                     }
                     const commentAccountId = requireAccountUuid(requireParam(this.getNodeParameter("commentSocialAccountId", i, ""), "Social Account ID", "social_account_id", "Postora Comment Trigger"), "the comment author's ID");
+                    const commentId = requireParam(this.getNodeParameter("commentId", i, ""), "Comment ID", "comment.id", "Postora Comment Trigger");
                     const commentBody = {
                         social_account_id: commentAccountId,
-                        comment_id: requireParam(this.getNodeParameter("commentId", i, ""), "Comment ID", "comment.id", "Postora Comment Trigger"),
+                        comment_id: resolvedPlatform === "threads" ? requireThreadsMediaId(commentId) : commentId,
                     };
                     // Left out on Auto-detect so the API derives it from the account, as Message → Reply does.
                     if (!isAutoPlatform)

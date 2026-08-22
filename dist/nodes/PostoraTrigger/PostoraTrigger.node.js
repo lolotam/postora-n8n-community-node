@@ -3,6 +3,41 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.PostoraTrigger = void 0;
 const n8n_workflow_1 = require("n8n-workflow");
 const webhookLifecycle_1 = require("../shared/webhookLifecycle");
+// n8n reads parameters straight off the stored node, and throws for one it has never stored,
+// so every read here passes the property's own default as the fallback.
+function eventsForCategories(context, categories) {
+    const events = [];
+    if (categories.includes("post"))
+        events.push("post.completed");
+    if (categories.includes("message")) {
+        events.push(...context.getNodeParameter("messageEvents", ["message.received"]));
+    }
+    if (categories.includes("comment")) {
+        events.push(...context.getNodeParameter("commentEvents", ["comment.received"]));
+    }
+    // "All Platforms" alongside a specific platform is harmless — Postora matches a payload
+    // against the whole list and delivers once per subscription — so only exact repeats are dropped.
+    return [...new Set(events)];
+}
+// Version 1 listed every event in one flat "Events" multi-select, which put Threads beside
+// WhatsApp under the message family even though Postora only ever emits Threads activity as
+// a comment envelope. Version 2 asks for the category first so the impossible pairings are
+// not offered at all. Version 1 nodes keep reading their saved "events" selection.
+function resolveSubscribedEvents(context) {
+    const events = context.getNodeParameter("events", []);
+    if ((context.getNode().typeVersion || 1) < 2)
+        return events;
+    const categories = context.getNodeParameter("eventCategories", []);
+    if (categories.length > 0)
+        return eventsForCategories(context, categories);
+    // Adding this node from the triggers side panel writes the chosen event straight into
+    // `events`, which version 2 hides. Honouring it here is what makes those nine panel
+    // entries produce the subscription they name. Picking a category replaces it outright,
+    // so a stale hidden value can never survive a later edit.
+    if (events.length > 0)
+        return events;
+    throw new Error("Select at least one Event Category, and at least one platform inside it, before activating the Postora Trigger.");
+}
 class PostoraTrigger {
     constructor() {
         this.description = {
@@ -10,7 +45,8 @@ class PostoraTrigger {
             name: "postoraTrigger",
             icon: "fa:bolt",
             group: ["trigger"],
-            version: 1,
+            version: [1, 2],
+            defaultVersion: 2,
             description: "Starts a workflow when Postora sends an event",
             defaults: {
                 name: "Postora Trigger",
@@ -32,6 +68,64 @@ class PostoraTrigger {
             ],
             properties: [
                 {
+                    displayName: "Event Category",
+                    name: "eventCategories",
+                    type: "multiOptions",
+                    options: [
+                        {
+                            name: "Post Completed",
+                            value: "post",
+                            description: "A scheduled or queued Postora post finished publishing",
+                        },
+                        {
+                            name: "Message Received",
+                            value: "message",
+                            description: "A direct message reached a connected WhatsApp, Instagram or Facebook account",
+                        },
+                        {
+                            name: "Comment Received",
+                            value: "comment",
+                            description: "A comment, reply or mention reached a connected Facebook, Instagram or Threads account",
+                        },
+                    ],
+                    default: [],
+                    description: "Pick as many categories as the workflow should react to. Each one adds its own platform selector below.",
+                    displayOptions: { show: { "@version": [2] } },
+                },
+                {
+                    displayName: "Message Platforms",
+                    name: "messageEvents",
+                    type: "multiOptions",
+                    options: [
+                        { name: "All Platforms", value: "message.received" },
+                        { name: "WhatsApp", value: "message.whatsapp" },
+                        { name: "Instagram", value: "message.instagram" },
+                        { name: "Facebook", value: "message.facebook" },
+                    ],
+                    default: ["message.received"],
+                    description: "Threads is absent on purpose: Postora never emits a Threads direct message, only comment-shaped events. Subscribe to those under Comment Received.",
+                    displayOptions: { show: { "@version": [2], eventCategories: ["message"] } },
+                },
+                {
+                    displayName: "Comment Platforms",
+                    name: "commentEvents",
+                    type: "multiOptions",
+                    options: [
+                        { name: "All Platforms", value: "comment.received" },
+                        { name: "Facebook", value: "comment.facebook" },
+                        { name: "Instagram", value: "comment.instagram" },
+                        { name: "Threads", value: "comment.threads" },
+                    ],
+                    default: ["comment.received"],
+                    description: "WhatsApp is absent on purpose: it has no public comments. Threads covers both replies and mentions — read comment.kind to tell them apart.",
+                    displayOptions: { show: { "@version": [2], eventCategories: ["comment"] } },
+                },
+                {
+                    // Two jobs. It is the parameter version 1 workflows still read, and — because n8n
+                    // builds the triggers side panel from the first property named "Event"/"Events"
+                    // without checking @version — it is also the list of entries that panel shows for
+                    // every version. The nine options below are therefore the nine panel triggers, and
+                    // resolveSubscribedEvents honours the one a panel click writes.
                     displayName: "Events",
                     name: "events",
                     type: "multiOptions",
@@ -39,49 +133,51 @@ class PostoraTrigger {
                         {
                             name: "Post Completed",
                             value: "post.completed",
+                            action: "Post Completed",
                         },
                         {
-                            name: "New Message Received (All Platforms)",
+                            name: "Message Received (All Platforms)",
                             value: "message.received",
+                            action: "Message Received (All Platforms)",
                         },
                         {
-                            name: "WhatsApp Message Received",
+                            name: "Message Received (WhatsApp)",
                             value: "message.whatsapp",
+                            action: "Message Received (WhatsApp)",
                         },
                         {
-                            name: "Instagram DM Received",
-                            value: "message.instagram",
-                        },
-                        {
-                            name: "Facebook Message Received",
+                            name: "Message Received (Facebook)",
                             value: "message.facebook",
+                            action: "Message Received (Facebook)",
                         },
                         {
-                            name: "New Comment Received (All Platforms)",
+                            name: "Message Received (Instagram)",
+                            value: "message.instagram",
+                            action: "Message Received (Instagram)",
+                        },
+                        {
+                            name: "Comment Received (All Platforms)",
                             value: "comment.received",
+                            action: "Comment Received (All Platforms)",
                         },
                         {
-                            name: "Facebook Comment Received",
+                            name: "Comment Received (Facebook)",
                             value: "comment.facebook",
+                            action: "Comment Received (Facebook)",
                         },
                         {
-                            name: "Instagram Comment Received",
+                            name: "Comment Received (Instagram)",
                             value: "comment.instagram",
+                            action: "Comment Received (Instagram)",
                         },
                         {
-                            name: "Threads Reply / Mention Received",
+                            name: "Comment Received (Threads)",
                             value: "comment.threads",
-                        },
-                        {
-                            name: "Threads Mention Created (legacy payload)",
-                            value: "threads.mention.created",
-                        },
-                        {
-                            name: "Threads Mention Replied (legacy payload)",
-                            value: "threads.mention.replied",
+                            action: "Comment Received (Threads)",
                         },
                     ],
-                    default: ["post.completed"],
+                    default: [],
+                    displayOptions: { show: { "@version": [1] } },
                 },
             ],
         };
@@ -97,7 +193,7 @@ class PostoraTrigger {
                     if (!webhookId)
                         return false;
                     const credentials = await this.getCredentials("postoraApi");
-                    const events = this.getNodeParameter("events");
+                    const events = resolveSubscribedEvents(this);
                     const callbackUrl = this.getNodeWebhookUrl("default");
                     // Without a callback URL every registration compares as mismatched, which would retire a
                     // perfectly good subscription and then fail in create() for the very same missing URL.
@@ -142,7 +238,7 @@ class PostoraTrigger {
                 },
                 async create() {
                     const credentials = await this.getCredentials("postoraApi");
-                    const events = this.getNodeParameter("events");
+                    const events = resolveSubscribedEvents(this);
                     const callbackUrl = this.getNodeWebhookUrl("default");
                     if (!callbackUrl) {
                         throw new Error("Postora webhook registration requires an n8n callback URL.");
