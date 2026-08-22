@@ -44,7 +44,7 @@ function normalizeList(input) {
 // Throws a clear, field-named error for a visible required parameter that came
 // back empty — so users see "Required parameter 'X' is empty" instead of n8n's
 // generic "Could not get parameter" when a field is hidden/blank.
-function requireParam(value, label, jsonPath) {
+function requireParam(value, label, jsonPath, triggerName) {
     const isEmpty = value === undefined ||
         value === null ||
         value === "" ||
@@ -56,10 +56,10 @@ function requireParam(value, label, jsonPath) {
     // between the trigger and this node and the default silently resolves to nothing, which is
     // the single most common way this error is reached. Say so, rather than telling someone to
     // fill in a field they can see is already filled in.
-    const hint = jsonPath
+    const hint = jsonPath && triggerName
         ? ` If the field still holds its default \`{{ $json.${jsonPath} }}\` and another node sits between the` +
             ` trigger and this one, \`$json\` is that node's output instead of the trigger's. Reference the trigger` +
-            ` directly: \`{{ $('Postora Comment Trigger').first().json.${jsonPath} }}\`, using the trigger's name` +
+            ` directly: \`{{ $('${triggerName}').first().json.${jsonPath} }}\`, using the trigger's name` +
             ` as it appears on your canvas.`
         : "";
     throw new Error(`Required parameter '${label}' is missing or empty. Open the node and fill in the '${label}' field, then run again.${hint}`);
@@ -69,6 +69,17 @@ function requireParam(value, label, jsonPath) {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 function isValidUuid(value) {
     return typeof value === "string" && UUID_RE.test(value.trim());
+}
+// A page id, a username or the other party's own id all reach the API as a non-UUID,
+// where the uuid column raises a type error the caller reads as a server fault. Name
+// the mistake before the request leaves n8n. `alsoNot` is the id most often confused
+// with the account's, which differs between a DM and a comment.
+function requireAccountUuid(value, alsoNot) {
+    if (isValidUuid(value))
+        return value;
+    throw new Error(`'${value}' is not a Postora account UUID. Social Account ID must be the \`social_account_id\` ` +
+        `from the trigger payload — not the Instagram/Facebook numeric ID, not ${alsoNot}, and not the ` +
+        `username. Run Resource = Account, Operation = List with this credential to see the UUIDs it can use.`);
 }
 // Platform "Auto-Detect": the API resolves the platform from social_account_id on its own and
 // treats a supplied `platform` purely as a cross-check, so auto sends no platform at all. The
@@ -472,15 +483,22 @@ class Postora {
                     displayName: "Social Account ID",
                     name: "messageSocialAccountId",
                     type: "string",
-                    default: "={{ $json.social_account_id }}",
+                    // `??` short-circuits: wired straight to a trigger, the right side never runs. With an
+                    // AI Agent in between, `$json` is the agent's output and the fallback reaches back to
+                    // the trigger. `.first()` rather than `.item` because paired-item tracking does not
+                    // survive an AI Agent, and a message trigger emits exactly one item anyway.
+                    default: "={{ $json.social_account_id ?? $('Postora Trigger').first().json.social_account_id }}",
                     required: true,
+                    description: "The Postora account UUID (social_accounts.id) that will send the reply. Not the Instagram/Facebook numeric ID, not sender.id, not the username. Run Resource = Account, Operation = List to see the UUIDs this credential can use.",
                     displayOptions: { show: { resource: ["message"], operation: ["send", "reply"] } },
                 },
                 {
                     displayName: "Recipient ID / Phone",
                     name: "messageRecipientId",
                     type: "string",
-                    default: "={{ $json.sender.id || $json.sender.phone }}",
+                    // `??` and not `||`: a recipient id is never legitimately falsy, but an absent
+                    // `sender` object is, and `?.` keeps that from throwing before the fallback runs.
+                    default: "={{ $json.sender?.id ?? $json.sender?.phone ?? $('Postora Trigger').first().json.sender.id }}",
                     required: true,
                     displayOptions: { show: { resource: ["message"], operation: ["send", "reply"] } },
                 },
@@ -1167,8 +1185,8 @@ class Postora {
                 }
                 // ── Message → Send / Reply ──
                 else if (resource === "message" && ["send", "reply"].includes(operation)) {
-                    const socialAccountId = requireParam(this.getNodeParameter("messageSocialAccountId", i, ""), "Social Account ID");
-                    const recipientId = requireParam(this.getNodeParameter("messageRecipientId", i, ""), "Recipient ID / Phone");
+                    const socialAccountId = requireAccountUuid(requireParam(this.getNodeParameter("messageSocialAccountId", i, ""), "Social Account ID", "social_account_id", "Postora Trigger"), "`sender.id`");
+                    const recipientId = requireParam(this.getNodeParameter("messageRecipientId", i, ""), "Recipient ID / Phone", "sender.id", "Postora Trigger");
                     const messageType = this.getNodeParameter("messageType", i, "text");
                     const messageText = this.getNodeParameter("messageText", i, "");
                     const messageBody = {
@@ -1201,9 +1219,10 @@ class Postora {
                     if (operation === "delete" && resolvedPlatform === "threads") {
                         throw new Error("Threads replies cannot be deleted. Use the Hide operation instead.");
                     }
+                    const commentAccountId = requireAccountUuid(requireParam(this.getNodeParameter("commentSocialAccountId", i, ""), "Social Account ID", "social_account_id", "Postora Comment Trigger"), "the comment author's ID");
                     const commentBody = {
-                        social_account_id: requireParam(this.getNodeParameter("commentSocialAccountId", i, ""), "Social Account ID", "social_account_id"),
-                        comment_id: requireParam(this.getNodeParameter("commentId", i, ""), "Comment ID", "comment.id"),
+                        social_account_id: commentAccountId,
+                        comment_id: requireParam(this.getNodeParameter("commentId", i, ""), "Comment ID", "comment.id", "Postora Comment Trigger"),
                     };
                     // Left out on Auto-detect so the API derives it from the account, as Message → Reply does.
                     if (!isAutoPlatform)

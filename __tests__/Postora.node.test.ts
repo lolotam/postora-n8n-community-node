@@ -405,7 +405,7 @@ describe("Postora node — Message → Send / Reply", () => {
         resource: "message",
         operation,
         messagePlatform: "auto",
-        messageSocialAccountId: "account-1",
+        messageSocialAccountId: "a1b2c3d4-1111-4222-8333-444455556666",
         messageRecipientId: "96512345678",
         messageText: "Hello from n8n",
         messageType: "text",
@@ -417,7 +417,7 @@ describe("Postora node — Message → Send / Reply", () => {
       method: "POST",
       url: "https://example.test/api/v1/messages/reply",
       body: {
-        social_account_id: "account-1",
+        social_account_id: "a1b2c3d4-1111-4222-8333-444455556666",
         recipient_id: "96512345678",
         message: "Hello from n8n",
         message_type: "text",
@@ -434,7 +434,7 @@ describe("Postora node — Message → Send / Reply", () => {
         resource: "message",
         operation: "reply",
         messagePlatform: "whatsapp",
-        messageSocialAccountId: "account-1",
+        messageSocialAccountId: "a1b2c3d4-1111-4222-8333-444455556666",
         messageRecipientId: "96512345678",
         messageText: "See this",
         messageType: "media",
@@ -445,7 +445,7 @@ describe("Postora node — Message → Send / Reply", () => {
     });
 
     expect(callLog[0].body).toEqual({
-      social_account_id: "account-1",
+      social_account_id: "a1b2c3d4-1111-4222-8333-444455556666",
       platform: "whatsapp",
       recipient_id: "96512345678",
       message: "See this",
@@ -698,7 +698,7 @@ describe("Postora node — Comment → Reply / Hide / Delete", () => {
         resource: "comment",
         operation: "reply",
         commentPlatform: "instagram",
-        commentSocialAccountId: "acc-1",
+        commentSocialAccountId: "b7c8d9e0-2222-4333-9444-555566667777",
         commentId: "c-1",
         commentMessage: "Thanks!",
       },
@@ -708,7 +708,7 @@ describe("Postora node — Comment → Reply / Hide / Delete", () => {
     expect(callLog[0]).toMatchObject({
       method: "POST",
       url: "https://example.test/api/v1/comments/reply",
-      body: { platform: "instagram", social_account_id: "acc-1", comment_id: "c-1", message: "Thanks!" },
+      body: { platform: "instagram", social_account_id: "b7c8d9e0-2222-4333-9444-555566667777", comment_id: "c-1", message: "Thanks!" },
       json: true,
     });
     expect(result[0].json).toEqual({ success: true, platform_comment_id: "r-1" });
@@ -720,7 +720,7 @@ describe("Postora node — Comment → Reply / Hide / Delete", () => {
         resource: "comment",
         operation: "hide",
         commentPlatform: "facebook",
-        commentSocialAccountId: "acc-1",
+        commentSocialAccountId: "b7c8d9e0-2222-4333-9444-555566667777",
         commentId: "c-1",
         commentHide: false,
       },
@@ -730,7 +730,7 @@ describe("Postora node — Comment → Reply / Hide / Delete", () => {
     expect(callLog[0].url).toBe("https://example.test/api/v1/comments/hide");
     expect(callLog[0].body).toEqual({
       platform: "facebook",
-      social_account_id: "acc-1",
+      social_account_id: "b7c8d9e0-2222-4333-9444-555566667777",
       comment_id: "c-1",
       hide: false,
     });
@@ -742,7 +742,7 @@ describe("Postora node — Comment → Reply / Hide / Delete", () => {
         resource: "comment",
         operation: "delete",
         commentPlatform: "facebook",
-        commentSocialAccountId: "acc-1",
+        commentSocialAccountId: "b7c8d9e0-2222-4333-9444-555566667777",
         commentId: "c-1",
       },
       http: () => ({ success: true }),
@@ -751,7 +751,7 @@ describe("Postora node — Comment → Reply / Hide / Delete", () => {
     expect(callLog[0].url).toBe("https://example.test/api/v1/comments/delete");
     expect(callLog[0].body).toEqual({
       platform: "facebook",
-      social_account_id: "acc-1",
+      social_account_id: "b7c8d9e0-2222-4333-9444-555566667777",
       comment_id: "c-1",
     });
   });
@@ -783,7 +783,7 @@ describe("Postora node — Comment → Reply / Hide / Delete", () => {
           resource: "comment",
           operation: "reply",
           commentPlatform: "facebook",
-          commentSocialAccountId: "acc-1",
+          commentSocialAccountId: "b7c8d9e0-2222-4333-9444-555566667777",
           commentId: "",
           commentMessage: "hi",
         },
@@ -803,14 +803,14 @@ describe("Postora node — Comment → Platform Auto-Detect", () => {
         operation: "reply",
         commentPlatform: "auto",
         commentPlatformDetected: "instagram",
-        commentSocialAccountId: "acc-1",
+        commentSocialAccountId: "b7c8d9e0-2222-4333-9444-555566667777",
         commentId: "c-1",
         commentMessage: "Thanks!",
       },
       http: () => ({ success: true, platform_comment_id: "r-1" }),
     });
 
-    expect(callLog[0].body).toEqual({ social_account_id: "acc-1", comment_id: "c-1", message: "Thanks!" });
+    expect(callLog[0].body).toEqual({ social_account_id: "b7c8d9e0-2222-4333-9444-555566667777", comment_id: "c-1", message: "Thanks!" });
     expect(callLog[0].body).not.toHaveProperty("platform");
   });
 
@@ -822,7 +822,7 @@ describe("Postora node — Comment → Platform Auto-Detect", () => {
           operation: "delete",
           commentPlatform: "auto",
           commentPlatformDetected: "threads",
-          commentSocialAccountId: "acc-1",
+          commentSocialAccountId: "b7c8d9e0-2222-4333-9444-555566667777",
           commentId: "r-1",
         },
         http: () => ({}),
@@ -837,14 +837,14 @@ describe("Postora node — Comment → Platform Auto-Detect", () => {
         operation: "delete",
         commentPlatform: "auto",
         commentPlatformDetected: "",
-        commentSocialAccountId: "acc-1",
+        commentSocialAccountId: "b7c8d9e0-2222-4333-9444-555566667777",
         commentId: "c-1",
       },
       http: () => ({ success: true }),
     });
 
     expect(callLog[0].url).toBe("https://example.test/api/v1/comments/delete");
-    expect(callLog[0].body).toEqual({ social_account_id: "acc-1", comment_id: "c-1" });
+    expect(callLog[0].body).toEqual({ social_account_id: "b7c8d9e0-2222-4333-9444-555566667777", comment_id: "c-1" });
   });
 
   it("reads the detected platform from the trigger when a node sits in between", () => {
@@ -867,7 +867,7 @@ describe("Postora node — Comment → Delete platform guard", () => {
           resource: "comment",
           operation: "delete",
           commentPlatform: "threads",
-          commentSocialAccountId: "acc-1",
+          commentSocialAccountId: "b7c8d9e0-2222-4333-9444-555566667777",
           commentId: "r-1",
         },
         http: () => ({}),
@@ -903,5 +903,112 @@ describe("Postora node — Comment fields survive a node between the trigger and
         params: { resource: "comment", operation: "reply", commentSocialAccountId: "", commentId: "c1", commentMessage: "hi" },
       }),
     ).rejects.toThrow(/another node sits between the trigger and this one/i);
+  });
+});
+
+// Production incident, 2026-08-22: a Message → Reply node returned 404 ACCOUNT_NOT_FOUND
+// because the account UUID it sent belonged to a different tenant than the credential's
+// API key. The Message fields had never received the trigger fallback the Comment fields
+// got, and nothing rejected a non-UUID before the request left n8n.
+describe("Postora node — Message fields survive a node between the trigger and the reply", () => {
+  const messageProperty = (name: string) =>
+    new Postora().description.properties.find((p: any) => p.name === name) as any;
+
+  it("falls back to the trigger by name when $json is another node's output", () => {
+    expect(messageProperty("messageSocialAccountId").default).toContain(
+      "$('Postora Trigger').first().json.social_account_id",
+    );
+    expect(messageProperty("messageRecipientId").default).toContain("$('Postora Trigger').first().json.sender.id");
+  });
+
+  it("short-circuits to $json so a directly wired trigger never resolves the fallback", () => {
+    expect(messageProperty("messageSocialAccountId").default).toMatch(/\$json\.social_account_id\s*\?\?/);
+    // The recipient chain tries the DM sender, then the WhatsApp phone, and only then the trigger.
+    expect(messageProperty("messageRecipientId").default).toMatch(/\$json\.sender\?\.id\s*\?\?/);
+    expect(messageProperty("messageRecipientId").default).toMatch(/\$json\.sender\?\.phone\s*\?\?/);
+  });
+
+  it("names the real cause when the account id still resolves to empty", async () => {
+    await expect(
+      run({
+        params: {
+          resource: "message",
+          operation: "reply",
+          messageSocialAccountId: "",
+          messageRecipientId: "96512345678",
+          messageText: "hi",
+        },
+      }),
+    ).rejects.toThrow(/another node sits between the trigger and this one/i);
+  });
+});
+
+describe("Postora node — Social Account ID must be a UUID before any request goes out", () => {
+  const nonUuids: Array<[string, string]> = [
+    ["a Facebook page id", "1214265425109740"],
+    ["an Instagram username", "danatfuture"],
+    ["a recipient PSID", "1782122539490411"],
+  ];
+
+  for (const [label, value] of nonUuids) {
+    it(`rejects ${label} on Message → Reply without calling the API`, async () => {
+      const requestsSent: string[] = [];
+      await expect(
+        run({
+          params: {
+            resource: "message",
+            operation: "reply",
+            messageSocialAccountId: value,
+            messageRecipientId: "96512345678",
+            messageText: "hi",
+          },
+          http: () => {
+            requestsSent.push(value);
+            return {};
+          },
+        }),
+      ).rejects.toThrow(/is not a Postora account UUID/);
+      expect(requestsSent).toHaveLength(0);
+    });
+
+    it(`rejects ${label} on Comment → Reply without calling the API`, async () => {
+      const requestsSent: string[] = [];
+      await expect(
+        run({
+          params: {
+            resource: "comment",
+            operation: "reply",
+            commentPlatform: "instagram",
+            commentSocialAccountId: value,
+            commentId: "c-1",
+            commentMessage: "hi",
+          },
+          http: () => {
+            requestsSent.push(value);
+            return {};
+          },
+        }),
+      ).rejects.toThrow(/is not a Postora account UUID/);
+      expect(requestsSent).toHaveLength(0);
+    });
+  }
+
+
+  it("still lets a foreign-but-valid UUID reach the API, where tenancy is enforced", async () => {
+    // The node must not try to decide ownership: only the API knows which accounts the
+    // credential owns, and a local guess would either leak that map or block a valid send.
+    const { callLog } = await run({
+      params: {
+        resource: "message",
+        operation: "reply",
+        messageSocialAccountId: "00000000-0000-4000-8000-000000000000",
+        messageRecipientId: "96512345678",
+        messageText: "hi",
+        messageType: "text",
+      },
+      http: () => ({ success: true, message_id: "wamid.4" }),
+    });
+
+    expect(callLog).toHaveLength(1);
   });
 });
