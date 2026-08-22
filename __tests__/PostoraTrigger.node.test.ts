@@ -17,6 +17,7 @@ function createHookContext(overrides: {
   events?: string[];
   listing?: RegisteredWebhook[];
   listingError?: Error;
+  deleteError?: Error;
 }) {
   const requests: WebhookRequest[] = [];
   const staticData = overrides.staticData ?? {};
@@ -35,6 +36,9 @@ function createHookContext(overrides: {
           if (request.method === "GET") {
             if (overrides.listingError) return Promise.reject(overrides.listingError);
             return Promise.resolve({ webhooks: overrides.listing ?? [] });
+          }
+          if (request.method === "DELETE" && overrides.deleteError) {
+            return Promise.reject(overrides.deleteError);
           }
           return Promise.resolve(overrides.webhookResponse ?? { webhook: { id: "subscription-123" } });
         },
@@ -106,6 +110,46 @@ describe("Postora Trigger", () => {
     expect(staticData.webhookId).toBeUndefined();
   });
 
+  it("refuses to re-register when the superseded subscription could not be retired", async () => {
+    // Two live subscriptions share this workflow's callback URL, and the post-event fan-out
+    // does not deduplicate by URL, so any event kept across the edit would fire twice.
+    const { context, staticData } = createHookContext({
+      staticData: { webhookId: "subscription-123" },
+      events: ["post.completed", "message.instagram"],
+      listing: [{
+        id: "subscription-123",
+        webhook_url: CALLBACK_URL,
+        events: ["post.completed"],
+        is_active: true,
+      }],
+      deleteError: Object.assign(new Error("500 Server Error"), { statusCode: 500 }),
+    });
+    const trigger = new PostoraTrigger();
+
+    await expect(trigger.webhookMethods?.default?.checkExists.call(context as any)).rejects.toThrow(
+      /deliver some events twice/i,
+    );
+    expect(staticData.webhookId).toBe("subscription-123");
+  });
+
+  it("treats an already-deleted subscription as retired and re-registers", async () => {
+    const { context, staticData } = createHookContext({
+      staticData: { webhookId: "subscription-123" },
+      events: ["message.instagram"],
+      listing: [{
+        id: "subscription-123",
+        webhook_url: CALLBACK_URL,
+        events: ["message.whatsapp"],
+        is_active: true,
+      }],
+      deleteError: Object.assign(new Error("404 Not Found"), { statusCode: 404 }),
+    });
+    const trigger = new PostoraTrigger();
+
+    await expect(trigger.webhookMethods?.default?.checkExists.call(context as any)).resolves.toBe(false);
+    expect(staticData.webhookId).toBeUndefined();
+  });
+
   it("re-registers when the subscription is gone from Postora, without a delete call", async () => {
     const { context, requests, staticData } = createHookContext({
       staticData: { webhookId: "subscription-123" },
@@ -135,6 +179,20 @@ describe("Postora Trigger", () => {
     const trigger = new PostoraTrigger();
 
     await expect(trigger.webhookMethods?.default?.checkExists.call(context as any)).resolves.toBe(false);
+  });
+
+  it("keeps the saved subscription when n8n cannot supply a callback URL", async () => {
+    // Every registration would compare as mismatched against an undefined URL, so retiring one
+    // here would destroy a working subscription over a condition create() cannot recover from.
+    const { context, requests, staticData } = createHookContext({
+      staticData: { webhookId: "subscription-123" },
+      callbackUrl: undefined,
+    });
+    const trigger = new PostoraTrigger();
+
+    await expect(trigger.webhookMethods?.default?.checkExists.call(context as any)).resolves.toBe(true);
+    expect(requests).toEqual([]);
+    expect(staticData.webhookId).toBe("subscription-123");
   });
 
   it("keeps the saved subscription when Postora is unreachable", async () => {

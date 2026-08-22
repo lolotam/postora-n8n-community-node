@@ -24,6 +24,18 @@ function sameEventSet(left: string[], right: string[]): boolean {
   return [...left].sort().every((event, index) => event === sortedRight[index]);
 }
 
+/**
+ * A 404 means the subscription is already gone, which is the outcome the delete wanted. n8n
+ * surfaces the upstream status differently depending on the HTTP helper, so several shapes
+ * are checked rather than assuming one.
+ */
+function isAlreadyGone(error: unknown): boolean {
+  const candidate = error as { statusCode?: number; httpCode?: number | string; response?: { status?: number } };
+  return candidate?.statusCode === 404 ||
+    candidate?.response?.status === 404 ||
+    Number(candidate?.httpCode) === 404;
+}
+
 async function unregisterWebhook(context: IHookFunctions, baseUrl: string, webhookId: string): Promise<void> {
   await context.helpers.httpRequestWithAuthentication.call(
     context as unknown as IAllExecuteFunctions,
@@ -104,6 +116,10 @@ export class PostoraTrigger implements INodeType {
         const credentials = await this.getCredentials<{ baseUrl: string }>("postoraApi");
         const events = this.getNodeParameter("events") as string[];
         const callbackUrl = this.getNodeWebhookUrl("default");
+        // Without a callback URL every registration compares as mismatched, which would retire a
+        // perfectly good subscription and then fail in create() for the very same missing URL.
+        // Keep what is registered and let create() report the problem if it is ever reached.
+        if (!callbackUrl) return true;
 
         let listing: WebhookListing;
         try {
@@ -133,9 +149,16 @@ export class PostoraTrigger implements INodeType {
         if (existing) {
           try {
             await unregisterWebhook(this, credentials.baseUrl, webhookId);
-          } catch {
-            // A failed cleanup must not block re-registration; the stale row stops
-            // matching this workflow's parameters and is inert apart from its own delivery.
+          } catch (error) {
+            // A surviving subscription is not inert: it keeps the same callback URL, and
+            // Postora's post-event fan-out does not deduplicate by URL, so any event kept
+            // across the edit would run this workflow twice. Refuse to re-register rather
+            // than leave two live subscriptions behind.
+            if (!isAlreadyGone(error)) {
+              throw new Error(
+                `Postora could not retire the previous webhook subscription (${webhookId}), so re-registering would deliver some events twice. Resolve the Postora API error and activate again.`,
+              );
+            }
           }
         }
         delete staticData.webhookId;
