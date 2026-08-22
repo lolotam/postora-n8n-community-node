@@ -70,6 +70,22 @@ Every `message.*` event carries the same body, so one workflow can serve several
 
 `account` identifies which of your connected accounts received the message: `name` is the platform username (or the WhatsApp number when the platform reports no username) and `handle` is the `@`-prefixed username on Instagram/Facebook (`null` for WhatsApp). To reply into the same conversation, pass `social_account_id` and `sender.id` to **Message → Reply** — the node's defaults already do this — and the pair uniquely routes the reply back to the right account and thread, however many accounts are connected. The reply response echoes the same `account` object.
 
+Since v1.4.1 the Message fields fall back to the trigger by name when `$json` is not the trigger's
+output, matching the Comment fields:
+`{{ $json.social_account_id ?? $('Postora Trigger').first().json.social_account_id }}` and
+`{{ $json.sender?.id ?? $json.sender?.phone ?? $('Postora Trigger').first().json.sender.id }}`.
+Put an AI Agent between the trigger and the reply and `$json` is the agent's output, which is how
+these fields used to resolve to nothing. **Social Account ID** is also checked for UUID shape
+before the request goes out, so pasting a Facebook page ID, an Instagram username or `sender.id`
+now fails in the node with a message naming the mistake instead of returning a server error.
+
+**Social Account ID must belong to the same Postora account as the node's API key.** A UUID from a
+different Postora user returns `404 ACCOUNT_NOT_FOUND` — that check is the tenancy boundary and is
+enforced server-side, so the node deliberately lets a valid-looking UUID through. If you run
+workflows for more than one Postora tenant on one n8n instance, give each its own credential and
+keep each reply node on the trigger that matches it. Run **Account → List** with a credential to
+see the UUIDs it can send from.
+
 Changing the **Events** selection takes effect the next time the workflow is activated: on activation the node compares its selection against the subscription registered with Postora and re-registers when they differ. Before v1.2.1 the original subscription was kept regardless, so an edited selection was silently ignored — if you edited Events on an already-active workflow under an older version, deactivate and reactivate it once after upgrading.
 
 ### Comment
