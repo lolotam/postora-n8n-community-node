@@ -32,8 +32,9 @@ function resolveSubscribedEvents(context) {
         return eventsForCategories(context, categories);
     // Adding this node from the triggers side panel writes the chosen event straight into
     // `events`, which version 2 hides. Honouring it here is what makes those nine panel
-    // entries produce the subscription they name. Picking a category replaces it outright,
-    // so a stale hidden value can never survive a later edit.
+    // entries produce the subscription they name. Any category selection takes precedence
+    // over it, so the two can never combine into a subscription nobody asked for — clearing
+    // every category does fall back to it again rather than erroring.
     if (events.length > 0)
         return events;
     throw new Error("Select at least one Event Category, and at least one platform inside it, before activating the Postora Trigger.");
