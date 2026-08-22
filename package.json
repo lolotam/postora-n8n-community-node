@@ -38,7 +38,8 @@
     ],
     "nodes": [
       "dist/nodes/Postora/Postora.node.js",
-      "dist/nodes/PostoraTrigger/PostoraTrigger.node.js"
+      "dist/nodes/PostoraTrigger/PostoraTrigger.node.js",
+      "dist/nodes/PostoraCommentTrigger/PostoraCommentTrigger.node.js"
     ]
   },
   "devDependencies": {
