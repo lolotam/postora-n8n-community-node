@@ -854,7 +854,7 @@ describe("Postora node — Comment → Platform Auto-Detect", () => {
 
     expect(detected.type).toBe("hidden");
     expect(detected.default).toMatch(/\$json\.platform\s*\?\?/);
-    expect(detected.default).toContain("$('Postora Comment Trigger').first().json.platform");
+    expect(detected.default).toContain("$('Postora Trigger').first().json.platform");
     expect(detected.displayOptions.show.commentPlatform).toEqual(["auto"]);
   });
 });
@@ -961,9 +961,9 @@ describe("Postora node — Comment fields survive a node between the trigger and
 
   it("falls back to the trigger by name when $json is another node's output", () => {
     expect(commentProperty("commentSocialAccountId").default).toContain(
-      "$('Postora Comment Trigger').first().json.social_account_id",
+      "$('Postora Trigger').first().json.social_account_id",
     );
-    expect(commentProperty("commentId").default).toContain("$('Postora Comment Trigger').first().json.comment");
+    expect(commentProperty("commentId").default).toContain("$('Postora Trigger').first().json.comment");
   });
 
   it("short-circuits to $json so a directly wired trigger never resolves the fallback", () => {

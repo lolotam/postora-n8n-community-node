@@ -407,7 +407,7 @@ class Postora {
                     displayName: "Detected Platform",
                     name: "commentPlatformDetected",
                     type: "hidden",
-                    default: "={{ $json.platform ?? $('Postora Comment Trigger').first().json.platform }}",
+                    default: "={{ $json.platform ?? $('Postora Trigger').first().json.platform }}",
                     displayOptions: { show: { resource: ["comment"], commentPlatform: ["auto"] } },
                 },
                 {
@@ -417,8 +417,8 @@ class Postora {
                     // `??` short-circuits: wired straight to a trigger, the right side never runs. With an
                     // AI Agent in between, `$json` is the agent's output and the fallback reaches back to
                     // the trigger. `.first()` rather than `.item` because paired-item tracking does not
-                    // survive an AI Agent, and a comment trigger emits exactly one item anyway.
-                    default: "={{ $json.social_account_id ?? $('Postora Comment Trigger').first().json.social_account_id }}",
+                    // survive an AI Agent, and the trigger emits exactly one item anyway.
+                    default: "={{ $json.social_account_id ?? $('Postora Trigger').first().json.social_account_id }}",
                     required: true,
                     displayOptions: { show: { resource: ["comment"] } },
                 },
@@ -427,8 +427,8 @@ class Postora {
                     name: "commentId",
                     type: "string",
                     // Falls back to data.mention_id so the legacy threads.mention.* envelopes, which have
-                    // no `comment` object, still populate this field from a Comment Trigger.
-                    default: "={{ ($json.comment ?? $('Postora Comment Trigger').first().json.comment)?.id ?? $json.data?.mention_id }}",
+                    // no `comment` object, still populate this field from the trigger.
+                    default: "={{ ($json.comment ?? $('Postora Trigger').first().json.comment)?.id ?? $json.data?.mention_id }}",
                     required: true,
                     displayOptions: { show: { resource: ["comment"] } },
                 },
@@ -1230,8 +1230,8 @@ class Postora {
                     if (operation === "delete" && resolvedPlatform === "threads") {
                         throw new Error("Threads replies cannot be deleted. Use the Hide operation instead.");
                     }
-                    const commentAccountId = requireAccountUuid(requireParam(this.getNodeParameter("commentSocialAccountId", i, ""), "Social Account ID", "social_account_id", "Postora Comment Trigger"), "the comment author's ID");
-                    const commentId = requireParam(this.getNodeParameter("commentId", i, ""), "Comment ID", "comment.id", "Postora Comment Trigger");
+                    const commentAccountId = requireAccountUuid(requireParam(this.getNodeParameter("commentSocialAccountId", i, ""), "Social Account ID", "social_account_id", "Postora Trigger"), "the comment author's ID");
+                    const commentId = requireParam(this.getNodeParameter("commentId", i, ""), "Comment ID", "comment.id", "Postora Trigger");
                     const commentBody = {
                         social_account_id: commentAccountId,
                         comment_id: resolvedPlatform === "threads" ? requireThreadsMediaId(commentId) : commentId,

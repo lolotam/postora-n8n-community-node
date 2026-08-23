@@ -38,29 +38,25 @@ Follow the [installation guide](https://docs.n8n.io/integrations/community-nodes
 ### Postora Trigger
 Starts a workflow when Postora sends a selected event. n8n registers and removes the callback automatically when the workflow is activated or deactivated.
 
-Since v1.5.0 the node asks for an **Event Category** first, then the platforms inside it:
+Since v1.6.0 this is the **only** trigger node — it absorbed the former Postora Comment Trigger.
+Three properties:
 
-| Event Category | Platform selector |
+| Property | Meaning |
 |---|---|
-| **Post Completed** | none — the category is the subscription (`post.completed`) |
-| **Message Received** | All Platforms (`message.received`), WhatsApp (`message.whatsapp`), Facebook (`message.facebook`), Instagram (`message.instagram`) |
-| **Comment Received** | All Platforms (`comment.received`), Facebook (`comment.facebook`), Instagram (`comment.instagram`), Threads (`comment.threads`) |
+| **Events** | Any mix of: `post.completed`, `comment.received`, `comment.threads`, `threads.mention.created`, `threads.mention.replied`, `message.received`, `message.whatsapp`, `message.instagram`, `message.facebook` |
+| **Platform** | All, Facebook, Instagram, Threads, or WhatsApp. Applies to message and comment events; `post.completed` carries no single platform and is delivered regardless |
+| **Account** | Loaded from your connected accounts (`GET /api/v1/accounts`), filtered by Platform. "All accounts" applies no account filter |
 
-Pick several categories at once and the subscription is the union of everything selected.
-Selecting **All Platforms** matches every platform in that category, so you do not also need the
-per-platform entries.
+Postora stores Platform and Account on the subscription and matches each event against them
+server-side, so one trigger can serve one account on one platform or everything at once.
 
-**Threads is not offered under Message Received, and WhatsApp is not offered under Comment
-Received** — Postora never emits a Threads direct message or a WhatsApp public comment, so those
-pairings could only produce a subscription that never fires. A Threads reply or mention arrives as
-`comment.received` with `platform: "threads"`; read `comment.kind` to tell a reply from a mention.
+A Threads reply or mention arrives as `comment.received` with `platform: "threads"`; read
+`comment.kind` to tell a reply from a mention. The two legacy `threads.mention.*` events carry
+the older `data` envelope and stay available for workflows built on it. WhatsApp has no public
+comments and Threads has no direct messages, so those pairings never fire.
 
-The two legacy mention events (`threads.mention.created`, `threads.mention.replied`) moved to
-**Postora Comment Trigger**, which is now their only home. Workflows already subscribed to them
-keep receiving them — Postora matches against the subscription it stored, not against this list.
-
-Workflows saved before v1.5.0 stay on node version 1 and keep their original flat **Events**
-selection untouched. Only newly added Postora Trigger nodes get the category UI.
+Workflows saved before v1.6.0 stay on node version 1 or 2 and keep their saved selection
+untouched. Only newly added Postora Trigger nodes get the unified properties.
 
 Every `message.*` event carries the same body, so one workflow can serve several connected accounts:
 
@@ -111,7 +107,7 @@ Changing the event selection takes effect the next time the workflow is activate
 **Platform** defaults to **Auto-detect** (added in v1.4.0), which leaves the platform out of the
 request entirely: Postora already knows whether the **Social Account ID** you send belongs to a
 Facebook, Instagram or Threads account, and derives the platform from it. That is why one Comment
-node handles a Comment Trigger set to **All** platforms without a Switch in front of it. Picking a
+node handles a Postora Trigger set to **All** platforms without a Switch in front of it. Picking a
 platform explicitly is only useful as a safety check — the API then rejects the call with
 `platform does not match the selected social account` when the account is not on that platform.
 
@@ -126,20 +122,19 @@ ID** before sending. Threads IDs are digits only (`17875366935604207`), so a Fac
 instead of reaching Threads and coming back as
 `Param reply_to_id is not a valid threads_media ID`.
 
-The field defaults read a **Postora Comment Trigger** payload, falling back to the trigger by
+The field defaults read a **Postora Trigger** payload, falling back to the trigger by
 name when `$json` is not the trigger's output:
-`{{ $json.social_account_id ?? $('Postora Comment Trigger').first().json.social_account_id }}`.
+`{{ $json.social_account_id ?? $('Postora Trigger').first().json.social_account_id }}`.
 
 That fallback matters because `$json` is always the **immediately preceding** node's output, not
-the trigger's. In a Comment Trigger → AI Agent → Comment Reply workflow the AI Agent sits in
+the trigger's. In a Postora Trigger → AI Agent → Comment Reply workflow the AI Agent sits in
 between, so a bare `{{ $json.social_account_id }}` resolves to nothing and the node fails with
 `Required parameter 'Social Account ID' is missing or empty` — on a field that visibly contains
 an expression.
 
 Two things this does not cover, both of which need a manual edit:
 
-- **A renamed trigger, or the main Postora Trigger** instead of the Comment Trigger. Replace the
-  node name in the expression with the one on your canvas, or drag the field across from the
+- **A renamed trigger.** Replace the node name in the expression with the one on your canvas, or drag the field across from the
   trigger's output panel and let n8n write the reference.
 - **Message.** Its default is `{{ $json.response }}`, which matches a Code/HTTP node that returns
   a `response` field. n8n's built-in **AI Agent** returns `output`, so point it at
@@ -151,20 +146,17 @@ saved with it, so upgrading the package does not rewrite a workflow you already 
 ### Account
 - **List** — List all connected social media accounts
 
-## Postora Comment Trigger
-
-A second trigger node, separate from **Postora Trigger**. It fires when a new comment,
-reply, or mention arrives on a connected Facebook, Instagram, or Threads account.
-
-| Property | Meaning |
-|---|---|
-| **Platform** | All, Facebook, Instagram, or Threads |
-| **Account** | Loaded from your connected accounts and filtered by Platform. "All accounts" applies no account filter |
-| **Events** | `comment.received` (default), plus `threads.mention.created` and `threads.mention.replied` for the legacy mention payload. Threads replies and mentions also arrive as `comment.received` with `comment.kind` set to `reply` or `mention` |
+### Comment events
 
 **Prerequisite — the trigger receives nothing without it:** in Postora, open the platform's
 Messaging page → **Auto Replies** → **Automation**, and set **Comments** to **n8n** for that
 account. Registering the trigger alone does not start delivery.
+
+Workflows built on the former **Postora Comment Trigger** (v1.3.0–v1.5.0) must be rebuilt on
+**Postora Trigger** after updating: the old node type no longer exists in the package, so n8n
+cannot activate a workflow that still contains it, and the subscription it registered stays
+behind on Postora until you delete it there (`DELETE /api/v1/webhooks/{id}`) or the rebuilt
+workflow is activated and deactivated once.
 
 **Threads needs nothing in the Meta App Dashboard.** Postora polls the Threads API itself
 (every two minutes) for new replies under your recent posts and for new mentions, and sends

@@ -1,6 +1,11 @@
-import { IHookFunctions, INodeType, INodeTypeDescription, IWebhookFunctions, IWebhookResponseData } from "n8n-workflow";
+import { IHookFunctions, ILoadOptionsFunctions, INodePropertyOptions, INodeType, INodeTypeDescription, IWebhookFunctions, IWebhookResponseData } from "n8n-workflow";
 export declare class PostoraTrigger implements INodeType {
     description: INodeTypeDescription;
+    methods: {
+        loadOptions: {
+            getAccounts(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]>;
+        };
+    };
     webhookMethods: {
         default: {
             checkExists(this: IHookFunctions): Promise<boolean>;
