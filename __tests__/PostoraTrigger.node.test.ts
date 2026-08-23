@@ -85,16 +85,19 @@ describe("Postora Trigger", () => {
     const trigger = new PostoraTrigger();
     const events = (trigger.description.properties?.find((property) => property.name === "events") as any).options;
 
+    // The two legacy threads.mention.* events are gone from this list on purpose: a mention
+    // already arrives as comment.threads with comment.kind "mention", and "replied" was an
+    // outbound confirmation from Postora's Mentions page, not an inbound event.
     expect(events.map((event: { value: string; action: string }) => [event.value, event.action])).toEqual([
       ["post.completed", "Post Completed"],
-      ["comment.received", "New Comment Received"],
-      ["comment.threads", "Threads Reply / Mention Received"],
-      ["threads.mention.created", "Threads Mention Created"],
-      ["threads.mention.replied", "Threads Mention Replied"],
-      ["message.received", "New Message Received"],
-      ["message.whatsapp", "WhatsApp Message Received"],
-      ["message.instagram", "Instagram DM Received"],
-      ["message.facebook", "Facebook Message Received"],
+      ["message.received", "DM Message (All Platforms)"],
+      ["message.whatsapp", "DM Message (WhatsApp)"],
+      ["message.facebook", "DM Message (Facebook)"],
+      ["message.instagram", "DM Message (Instagram)"],
+      ["comment.received", "Comment (All Platforms)"],
+      ["comment.facebook", "Comment (Facebook)"],
+      ["comment.instagram", "Comment (Instagram)"],
+      ["comment.threads", "Reply / Mention (Threads)"],
     ]);
   });
 
@@ -479,11 +482,16 @@ describe("Postora Trigger — version 3 unified filters", () => {
   it("loads accounts filtered by the selected platform with an All option first", async () => {
     const ctx = {
       getCredentials: async () => ({ baseUrl: "https://api.example.test" }),
-      getCurrentNodeParameter: () => "whatsapp",
+      getCurrentNodeParameter: (name: string) => (name === "platform" ? "whatsapp" : undefined),
       helpers: {
         httpRequestWithAuthentication: async (_c: string, req: { url: string }) => {
-          expect(req.url).toBe("https://api.example.test/api/v1/accounts?platform=whatsapp");
-          return { accounts: [{ id: "acc-1", platform: "whatsapp", platform_username: null, name: "965123" }] };
+          expect(req.url).toBe("https://api.example.test/api/v1/accounts");
+          return {
+            accounts: [
+              { id: "acc-1", platform: "whatsapp", platform_username: null, name: "965123" },
+              { id: "acc-2", platform: "instagram", platform_username: "shop" },
+            ],
+          };
         },
       },
     };
@@ -529,11 +537,39 @@ describe("Postora Trigger — version 4 Event Category with filters", () => {
     expect(new PostoraTrigger().description.defaultVersion).toBe(4);
   });
 
-  it("shows Event Category first, then its platform selectors, then Platform and Account", () => {
+  it("shows Event Category first, then its platform selectors, then Account — no Platform field", () => {
+    // An account is on exactly one platform, so a Platform filter next to the category
+    // selectors was the same choice asked twice.
     const shown = new PostoraTrigger().description.properties
       .filter((property) => (property.displayOptions?.show?.["@version"] as number[] | undefined)?.includes(4))
       .map((property) => property.name);
-    expect(shown).toEqual(["eventCategories", "messageEvents", "commentEvents", "platform", "socialAccountId"]);
+    expect(shown).toEqual(["eventCategories", "messageEvents", "commentEvents", "socialAccountId"]);
+  });
+
+  const ACCOUNTS = [
+    { id: "wa", platform: "whatsapp", platform_username: null, name: "965" },
+    { id: "ig", platform: "instagram", platform_username: "shop" },
+    { id: "fb", platform: "facebook", platform_username: "Page" },
+    { id: "th", platform: "threads", platform_username: "shop" },
+    { id: "tt", platform: "tiktok", platform_username: "clips" },
+  ];
+
+  it.each([
+    ["nothing selected yet", {}, ["wa", "ig", "fb", "th"]],
+    ["Message Received on WhatsApp", { eventCategories: ["message"], messageEvents: ["message.whatsapp"] }, ["wa"]],
+    ["Message Received on All Platforms", { eventCategories: ["message"], messageEvents: ["message.received"] }, ["wa", "ig", "fb"]],
+    ["Comment Received on Threads", { eventCategories: ["comment"], commentEvents: ["comment.threads"] }, ["th"]],
+    ["Comment Received on All Platforms", { eventCategories: ["comment"], commentEvents: ["comment.received"] }, ["ig", "fb", "th"]],
+    ["both categories", { eventCategories: ["message", "comment"], messageEvents: ["message.whatsapp"], commentEvents: ["comment.threads"] }, ["wa", "th"]],
+    ["Post Completed only", { eventCategories: ["post"] }, ["wa", "ig", "fb", "th"]],
+  ])("lists the accounts implied by the selection: %s", async (_label, params: Record<string, unknown>, expected) => {
+    const ctx = {
+      getCredentials: async () => ({ baseUrl: "https://api.example.test" }),
+      getCurrentNodeParameter: (name: string) => params[name],
+      helpers: { httpRequestWithAuthentication: async () => ({ accounts: ACCOUNTS }) },
+    };
+    const options = await new PostoraTrigger().methods.loadOptions.getAccounts.call(ctx as any);
+    expect(options.map((o) => o.value)).toEqual(["", ...expected]);
   });
 
   it("registers the categories' events together with the platform and account filters", async () => {
@@ -541,14 +577,12 @@ describe("Postora Trigger — version 4 Event Category with filters", () => {
       ...v4,
       eventCategories: ["post", "comment"],
       commentEvents: ["comment.threads"],
-      platform: "threads",
       socialAccountId: "acc-1",
     });
     await new PostoraTrigger().webhookMethods.default.create.call(context as any);
     expect(requests[0].body).toEqual({
       webhook_url: CALLBACK_URL,
       events: ["post.completed", "comment.threads"],
-      platform: "threads",
       social_account_id: "acc-1",
     });
   });

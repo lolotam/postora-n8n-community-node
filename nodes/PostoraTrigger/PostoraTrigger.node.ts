@@ -87,6 +87,35 @@ function registrationBody(callbackUrl: string, events: string[], filters: Subscr
 }
 
 const ACCOUNT_PLATFORMS = ["facebook", "instagram", "threads", "whatsapp"];
+const MESSAGE_PLATFORMS = ["whatsapp", "instagram", "facebook"];
+const COMMENT_PLATFORMS = ["facebook", "instagram", "threads"];
+
+// An account is on exactly one platform, so choosing one already says which platform to hear
+// from; the separate Platform filter that version 3 had was the same choice made twice. What
+// the Account list shows is therefore derived from the events selected above it. With nothing
+// selected yet it shows every account that can emit a message or a comment.
+function platformsImpliedBy(events: string[]): string[] {
+  const implied = new Set<string>();
+  for (const event of events) {
+    const [family, platform] = event.split(".");
+    const whole = family === "message" ? MESSAGE_PLATFORMS : family === "comment" ? COMMENT_PLATFORMS : [];
+    if (platform === "received") whole.forEach((name) => implied.add(name));
+    else if (whole.includes(platform)) implied.add(platform);
+  }
+  return implied.size > 0 ? [...implied] : ACCOUNT_PLATFORMS;
+}
+
+function selectedEventsForAccountList(context: ILoadOptionsFunctions): string[] {
+  const categories = (context.getCurrentNodeParameter("eventCategories") as string[] | undefined) ?? [];
+  const events: string[] = [];
+  if (categories.includes("message")) {
+    events.push(...((context.getCurrentNodeParameter("messageEvents") as string[] | undefined) ?? ["message.received"]));
+  }
+  if (categories.includes("comment")) {
+    events.push(...((context.getCurrentNodeParameter("commentEvents") as string[] | undefined) ?? ["comment.received"]));
+  }
+  return events;
+}
 
 export class PostoraTrigger implements INodeType {
   description: INodeTypeDescription = {
@@ -125,15 +154,63 @@ export class PostoraTrigger implements INodeType {
         name: "events",
         type: "multiOptions",
         options: [
-          { name: "Post Completed", value: "post.completed", action: "Post Completed" },
-          { name: "New Comment Received", value: "comment.received", action: "New Comment Received", description: "Facebook and Instagram comments, Threads replies and mentions (see comment.kind)" },
-          { name: "Threads Reply / Mention Received", value: "comment.threads", action: "Threads Reply / Mention Received" },
-          { name: "Threads Mention Created", value: "threads.mention.created", action: "Threads Mention Created", description: "Legacy mention envelope with a data object" },
-          { name: "Threads Mention Replied", value: "threads.mention.replied", action: "Threads Mention Replied", description: "Legacy mention envelope with a data object" },
-          { name: "New Message Received", value: "message.received", action: "New Message Received" },
-          { name: "WhatsApp Message Received", value: "message.whatsapp", action: "WhatsApp Message Received" },
-          { name: "Instagram DM Received", value: "message.instagram", action: "Instagram DM Received" },
-          { name: "Facebook Message Received", value: "message.facebook", action: "Facebook Message Received" },
+          // ── Post publishing ──
+          {
+            name: "Post Completed",
+            value: "post.completed",
+            action: "Post Completed",
+            description: "A scheduled or queued Postora post finished publishing",
+          },
+          // ── Direct messages ──
+          {
+            name: "DM Message (All Platforms)",
+            value: "message.received",
+            action: "DM Message (All Platforms)",
+            description: "A direct message reached WhatsApp, Instagram or Facebook",
+          },
+          {
+            name: "DM Message (WhatsApp)",
+            value: "message.whatsapp",
+            action: "DM Message (WhatsApp)",
+            description: "A message reached a connected WhatsApp account",
+          },
+          {
+            name: "DM Message (Facebook)",
+            value: "message.facebook",
+            action: "DM Message (Facebook)",
+            description: "A direct message reached a connected Facebook Page",
+          },
+          {
+            name: "DM Message (Instagram)",
+            value: "message.instagram",
+            action: "DM Message (Instagram)",
+            description: "A direct message reached a connected Instagram account",
+          },
+          // ── Comments & mentions ──
+          {
+            name: "Comment (All Platforms)",
+            value: "comment.received",
+            action: "Comment (All Platforms)",
+            description: "A comment or reply reached Facebook, Instagram or Threads",
+          },
+          {
+            name: "Comment (Facebook)",
+            value: "comment.facebook",
+            action: "Comment (Facebook)",
+            description: "A comment was posted on a connected Facebook Page",
+          },
+          {
+            name: "Comment (Instagram)",
+            value: "comment.instagram",
+            action: "Comment (Instagram)",
+            description: "A comment was posted on a connected Instagram post",
+          },
+          {
+            name: "Reply / Mention (Threads)",
+            value: "comment.threads",
+            action: "Reply / Mention (Threads)",
+            description: "A reply or mention was received on Threads",
+          },
         ],
         default: ["comment.received"],
         displayOptions: { show: { "@version": [3] } },
@@ -204,15 +281,18 @@ export class PostoraTrigger implements INodeType {
         ],
         default: "",
         description: "Only message and comment events from this platform trigger the workflow. Post Completed events are not filtered.",
-        displayOptions: { show: { "@version": [3, 4] } },
+        displayOptions: { show: { "@version": [3] } },
       },
       {
         displayName: "Account",
         name: "socialAccountId",
         type: "options",
-        typeOptions: { loadOptionsMethod: "getAccounts", loadOptionsDependsOn: ["platform"] },
+        typeOptions: {
+          loadOptionsMethod: "getAccounts",
+          loadOptionsDependsOn: ["platform", "eventCategories", "messageEvents", "commentEvents"],
+        },
         default: "",
-        description: "Only message and comment events on this account trigger the workflow. For comments, the account's Comments automation handler must be set to n8n in Postora (Messaging → Automation), otherwise no comment events are sent.",
+        description: "Only message and comment events on this account trigger the workflow. The list follows the platforms selected above. For comments, the account's Comments automation handler must be set to n8n in Postora (Messaging → Automation), otherwise no comment events are sent.",
         displayOptions: { show: { "@version": [3, 4] } },
       },
       {
@@ -279,23 +359,22 @@ export class PostoraTrigger implements INodeType {
       async getAccounts(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
         const credentials = await this.getCredentials("postoraApi");
         const baseUrl = credentials.baseUrl as string;
+        // A version 3 node still carries its Platform field; a version 4 node implies the
+        // platforms from its category selection. One API call for everything, filtered here,
+        // because the API takes a single platform and the selection can name several.
         const platform = (this.getCurrentNodeParameter("platform") as string) || "";
-        const url = platform
-          ? `${baseUrl}/api/v1/accounts?platform=${encodeURIComponent(platform)}`
-          : `${baseUrl}/api/v1/accounts`;
+        const platforms = platform ? [platform] : platformsImpliedBy(selectedEventsForAccountList(this));
         const response = await this.helpers.httpRequestWithAuthentication.call(
           this as unknown as IAllExecuteFunctions,
           "postoraApi",
-          { method: "GET", url, json: true },
+          { method: "GET", url: `${baseUrl}/api/v1/accounts`, json: true },
         );
         const accounts: Array<{ id: string; platform: string; platform_username?: string | null; name?: string | null }> =
           Array.isArray(response?.accounts) ? response.accounts : [];
         return [
           { name: "All accounts", value: "" },
           ...accounts
-            // Only the platforms that emit message or comment events; the filter does nothing
-            // for a publishing-only account such as TikTok or YouTube.
-            .filter((account) => ACCOUNT_PLATFORMS.includes(account.platform))
+            .filter((account) => platforms.includes(account.platform))
             .map((account) => ({
               name: `${account.platform_username || account.name || account.id} (${account.platform})`,
               value: account.id,
