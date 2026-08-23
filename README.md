@@ -39,15 +39,14 @@ Follow the [installation guide](https://docs.n8n.io/integrations/community-nodes
 Starts a workflow when Postora sends a selected event. n8n registers and removes the callback automatically when the workflow is activated or deactivated.
 
 Since v1.6.0 this is the **only** trigger node — it absorbed the former Postora Comment Trigger.
-Since v1.7.0 it asks for the **Event Category** first:
+Since v1.7.0 it asks for the **Event Category** first (v1.8.0 dropped the separate Platform field):
 
 | Property | Meaning |
 |---|---|
 | **Event Category** | Any mix of **Post Completed**, **Message Received**, **Comment Received**. Each category you pick adds its own platform selector below |
 | **Message Platforms** | All Platforms (`message.received`), WhatsApp (`message.whatsapp`), Instagram (`message.instagram`), Facebook (`message.facebook`). Threads is not offered — Postora never emits a Threads direct message |
 | **Comment Platforms** | All Platforms (`comment.received`), Facebook (`comment.facebook`), Instagram (`comment.instagram`), Threads (`comment.threads`). WhatsApp is not offered — it has no public comments |
-| **Platform** | All, Facebook, Instagram, Threads, or WhatsApp. Applies to message and comment events; `post.completed` carries no single platform and is delivered regardless |
-| **Account** | Loaded from your connected accounts (`GET /api/v1/accounts`), filtered by Platform. "All accounts" applies no account filter |
+| **Account** | Loaded from your connected accounts (`GET /api/v1/accounts`) and narrowed to the platforms your selection implies — pick WhatsApp under Message Received and only WhatsApp accounts are listed. "All accounts" applies no account filter. An account is on exactly one platform, so this is also the platform filter; `post.completed` carries no single account and is delivered regardless |
 
 The subscription is the union of everything selected. Adding the node from n8n's triggers side
 panel pre-selects that one event; it is replaced the moment you pick a category.
@@ -56,9 +55,15 @@ Postora stores Platform and Account on the subscription and matches each event a
 server-side, so one trigger can serve one account on one platform or everything at once.
 
 A Threads reply or mention arrives as `comment.received` with `platform: "threads"`; read
-`comment.kind` to tell a reply from a mention. The two legacy `threads.mention.*` events carry
-the older `data` envelope and stay available for workflows built on it. WhatsApp has no public
-comments and Threads has no direct messages, so those pairings never fire.
+`comment.kind` to tell a reply from a mention. The legacy `threads.mention.created` /
+`threads.mention.replied` events are no longer offered (v1.8.0) — a mention already arrives as
+`comment.threads`, and "replied" only confirmed a reply sent from Postora's own Mentions page.
+Workflows that saved them keep receiving them. WhatsApp has no public comments and Threads has
+no direct messages, so those pairings never fire.
+
+The triggers side panel offers nine entries — Post Completed, DM Message (All / WhatsApp /
+Facebook / Instagram), Comment (All / Facebook / Instagram), Reply / Mention (Threads); picking
+one pre-selects that event until you choose a category.
 
 Workflows saved on an earlier version keep their saved selection untouched — v1.6.0 nodes keep
 their flat **Events** list, v1.5.0 nodes their categories without filters. Only newly added
