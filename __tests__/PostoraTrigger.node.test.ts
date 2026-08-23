@@ -311,7 +311,7 @@ describe("Postora Trigger — version 2 Event Category", () => {
   it("still loads version 1 and version 2 workflows", () => {
     const trigger = new PostoraTrigger();
 
-    expect(trigger.description.version).toEqual([1, 2, 3]);
+    expect(trigger.description.version).toEqual([1, 2, 3, 4]);
   });
 
   it("never offers Threads as a message platform or WhatsApp as a comment platform", () => {
@@ -408,11 +408,7 @@ describe("Postora Trigger — version 2 Event Category", () => {
 describe("Postora Trigger — version 3 unified filters", () => {
   const v3 = { typeVersion: 3 };
 
-  it("defaults new nodes to version 3", () => {
-    expect(new PostoraTrigger().description.defaultVersion).toBe(3);
-  });
-
-  it("shows Events, Platform and Account first, in that order, for version 3 only", () => {
+  it("shows Events, Platform and Account, in that order, for version 3", () => {
     const shown = new PostoraTrigger().description.properties
       .filter((property) => (property.displayOptions?.show?.["@version"] as number[] | undefined)?.includes(3))
       .map((property) => property.name);
@@ -523,5 +519,61 @@ describe("Postora Trigger — version 3 unified filters", () => {
     });
     await expect(new PostoraTrigger().webhookMethods.default.delete.call(context as any)).resolves.toBe(true);
     expect(staticData.webhookId).toBeUndefined();
+  });
+});
+
+describe("Postora Trigger — version 4 Event Category with filters", () => {
+  const v4 = { typeVersion: 4 };
+
+  it("defaults new nodes to version 4", () => {
+    expect(new PostoraTrigger().description.defaultVersion).toBe(4);
+  });
+
+  it("shows Event Category first, then its platform selectors, then Platform and Account", () => {
+    const shown = new PostoraTrigger().description.properties
+      .filter((property) => (property.displayOptions?.show?.["@version"] as number[] | undefined)?.includes(4))
+      .map((property) => property.name);
+    expect(shown).toEqual(["eventCategories", "messageEvents", "commentEvents", "platform", "socialAccountId"]);
+  });
+
+  it("registers the categories' events together with the platform and account filters", async () => {
+    const { context, requests } = createHookContext({
+      ...v4,
+      eventCategories: ["post", "comment"],
+      commentEvents: ["comment.threads"],
+      platform: "threads",
+      socialAccountId: "acc-1",
+    });
+    await new PostoraTrigger().webhookMethods.default.create.call(context as any);
+    expect(requests[0].body).toEqual({
+      webhook_url: CALLBACK_URL,
+      events: ["post.completed", "comment.threads"],
+      platform: "threads",
+      social_account_id: "acc-1",
+    });
+  });
+
+  it("honours a triggers-panel click on a version 4 node until a category is chosen", async () => {
+    const { context, requests } = createHookContext({ ...v4, events: ["message.whatsapp"] });
+    await new PostoraTrigger().webhookMethods.default.create.call(context as any);
+    expect(requests[0].body).toEqual({ webhook_url: CALLBACK_URL, events: ["message.whatsapp"] });
+  });
+
+  it("retires a subscription whose account filter changed even when the events did not", async () => {
+    const { context, requests } = createHookContext({
+      ...v4,
+      staticData: { webhookId: "subscription-123" },
+      eventCategories: ["comment"],
+      socialAccountId: "acc-2",
+      listing: [{ id: "subscription-123", webhook_url: CALLBACK_URL, events: ["comment.received"], is_active: true, social_account_id: "acc-1" }],
+    });
+    await expect(new PostoraTrigger().webhookMethods.default.checkExists.call(context as any)).resolves.toBe(false);
+    expect(requests.map((r) => r.method)).toEqual(["GET", "DELETE"]);
+  });
+
+  it("keeps reading the flat events list for a node saved on version 3", async () => {
+    const { context, requests } = createHookContext({ typeVersion: 3, events: ["threads.mention.created"], platform: "threads" });
+    await new PostoraTrigger().webhookMethods.default.create.call(context as any);
+    expect(requests[0].body).toEqual({ webhook_url: CALLBACK_URL, events: ["threads.mention.created"], platform: "threads" });
   });
 });

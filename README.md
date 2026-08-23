@@ -39,13 +39,18 @@ Follow the [installation guide](https://docs.n8n.io/integrations/community-nodes
 Starts a workflow when Postora sends a selected event. n8n registers and removes the callback automatically when the workflow is activated or deactivated.
 
 Since v1.6.0 this is the **only** trigger node — it absorbed the former Postora Comment Trigger.
-Three properties:
+Since v1.7.0 it asks for the **Event Category** first:
 
 | Property | Meaning |
 |---|---|
-| **Events** | Any mix of: `post.completed`, `comment.received`, `comment.threads`, `threads.mention.created`, `threads.mention.replied`, `message.received`, `message.whatsapp`, `message.instagram`, `message.facebook` |
+| **Event Category** | Any mix of **Post Completed**, **Message Received**, **Comment Received**. Each category you pick adds its own platform selector below |
+| **Message Platforms** | All Platforms (`message.received`), WhatsApp (`message.whatsapp`), Instagram (`message.instagram`), Facebook (`message.facebook`). Threads is not offered — Postora never emits a Threads direct message |
+| **Comment Platforms** | All Platforms (`comment.received`), Facebook (`comment.facebook`), Instagram (`comment.instagram`), Threads (`comment.threads`). WhatsApp is not offered — it has no public comments |
 | **Platform** | All, Facebook, Instagram, Threads, or WhatsApp. Applies to message and comment events; `post.completed` carries no single platform and is delivered regardless |
 | **Account** | Loaded from your connected accounts (`GET /api/v1/accounts`), filtered by Platform. "All accounts" applies no account filter |
+
+The subscription is the union of everything selected. Adding the node from n8n's triggers side
+panel pre-selects that one event; it is replaced the moment you pick a category.
 
 Postora stores Platform and Account on the subscription and matches each event against them
 server-side, so one trigger can serve one account on one platform or everything at once.
@@ -55,8 +60,9 @@ A Threads reply or mention arrives as `comment.received` with `platform: "thread
 the older `data` envelope and stay available for workflows built on it. WhatsApp has no public
 comments and Threads has no direct messages, so those pairings never fire.
 
-Workflows saved before v1.6.0 stay on node version 1 or 2 and keep their saved selection
-untouched. Only newly added Postora Trigger nodes get the unified properties.
+Workflows saved on an earlier version keep their saved selection untouched — v1.6.0 nodes keep
+their flat **Events** list, v1.5.0 nodes their categories without filters. Only newly added
+Postora Trigger nodes get the current properties.
 
 Every `message.*` event carries the same body, so one workflow can serve several connected accounts:
 

@@ -34,15 +34,15 @@ function eventsForCategories(context: IHookFunctions, categories: string[]): str
   return [...new Set(events)];
 }
 
-// Version 1 listed every event in one flat "Events" multi-select, which put Threads beside
-// WhatsApp under the message family even though Postora only ever emits Threads activity as
-// a comment envelope. Version 2 asks for the category first so the impossible pairings are
-// not offered at all. Version 1 nodes keep reading their saved "events" selection.
+// Versions 1 and 3 list every event in one flat "Events" multi-select, which puts Threads
+// beside WhatsApp under the message family even though Postora only ever emits Threads
+// activity as a comment envelope. Versions 2 and 4 ask for the category first so the
+// impossible pairings are not offered at all. Each version keeps reading what it saved.
 function resolveSubscribedEvents(context: IHookFunctions): string[] {
   const events = context.getNodeParameter("events", []) as string[];
   const typeVersion = context.getNode().typeVersion || 1;
-  if (typeVersion < 2) return events;
-  if (typeVersion >= 3) {
+  if (typeVersion === 1) return events;
+  if (typeVersion === 3) {
     if (events.length > 0) return events;
     throw new Error("Select at least one Event before activating the Postora Trigger.");
   }
@@ -51,7 +51,7 @@ function resolveSubscribedEvents(context: IHookFunctions): string[] {
   if (categories.length > 0) return eventsForCategories(context, categories);
 
   // Adding this node from the triggers side panel writes the chosen event straight into
-  // `events`, which version 2 hides. Honouring it here is what makes those nine panel
+  // `events`, which the category versions hide. Honouring it here is what makes the panel
   // entries produce the subscription they name. Any category selection takes precedence
   // over it, so the two can never combine into a subscription nobody asked for — clearing
   // every category does fall back to it again rather than erroring.
@@ -62,8 +62,8 @@ function resolveSubscribedEvents(context: IHookFunctions): string[] {
   );
 }
 
-// Version 3 folds the Comment Trigger's Platform and Account filters into this node, so one
-// trigger covers every Postora event. Postora applies both filters to message and comment
+// Version 3 folded the Comment Trigger's Platform and Account filters into this node, so one
+// trigger covers every Postora event; version 4 keeps them under the category selectors. Postora applies both filters to message and comment
 // envelopes; a post.completed event carries no single platform or account and is delivered
 // regardless. Both are stored on the subscription and matched server-side.
 type SubscriptionFilters = { platform: string; socialAccountId: string };
@@ -94,8 +94,8 @@ export class PostoraTrigger implements INodeType {
     name: "postoraTrigger",
     icon: "fa:bolt",
     group: ["trigger"],
-    version: [1, 2, 3],
-    defaultVersion: 3,
+    version: [1, 2, 3, 4],
+    defaultVersion: 4,
     description: "Starts a workflow when Postora sends an event",
     defaults: {
       name: "Postora Trigger",
@@ -118,7 +118,9 @@ export class PostoraTrigger implements INodeType {
     properties: [
       {
         // First on purpose: n8n builds the triggers side panel from the first property named
-        // "Events" without checking @version, so this list is also what the panel shows.
+        // "Events" without checking @version, so this list is what the panel shows for every
+        // version. Only version 3 nodes display it; a panel click on a version 4 node stores
+        // its one event here and resolveSubscribedEvents honours it.
         displayName: "Events",
         name: "events",
         type: "multiOptions",
@@ -134,30 +136,6 @@ export class PostoraTrigger implements INodeType {
           { name: "Facebook Message Received", value: "message.facebook", action: "Facebook Message Received" },
         ],
         default: ["comment.received"],
-        displayOptions: { show: { "@version": [3] } },
-      },
-      {
-        displayName: "Platform",
-        name: "platform",
-        type: "options",
-        options: [
-          { name: "All", value: "" },
-          { name: "Facebook", value: "facebook" },
-          { name: "Instagram", value: "instagram" },
-          { name: "Threads", value: "threads" },
-          { name: "WhatsApp", value: "whatsapp" },
-        ],
-        default: "",
-        description: "Only message and comment events from this platform trigger the workflow. Post Completed events are not filtered.",
-        displayOptions: { show: { "@version": [3] } },
-      },
-      {
-        displayName: "Account",
-        name: "socialAccountId",
-        type: "options",
-        typeOptions: { loadOptionsMethod: "getAccounts", loadOptionsDependsOn: ["platform"] },
-        default: "",
-        description: "Only message and comment events on this account trigger the workflow. For comments, the account's Comments automation handler must be set to n8n in Postora (Messaging → Automation), otherwise no comment events are sent.",
         displayOptions: { show: { "@version": [3] } },
       },
       {
@@ -183,7 +161,7 @@ export class PostoraTrigger implements INodeType {
         ],
         default: [],
         description: "Pick as many categories as the workflow should react to. Each one adds its own platform selector below.",
-        displayOptions: { show: { "@version": [2] } },
+        displayOptions: { show: { "@version": [2, 4] } },
       },
       {
         displayName: "Message Platforms",
@@ -197,7 +175,7 @@ export class PostoraTrigger implements INodeType {
         ],
         default: ["message.received"],
         description: "Threads is absent on purpose: Postora never emits a Threads direct message, only comment-shaped events. Subscribe to those under Comment Received.",
-        displayOptions: { show: { "@version": [2], eventCategories: ["message"] } },
+        displayOptions: { show: { "@version": [2, 4], eventCategories: ["message"] } },
       },
       {
         displayName: "Comment Platforms",
@@ -211,7 +189,31 @@ export class PostoraTrigger implements INodeType {
         ],
         default: ["comment.received"],
         description: "WhatsApp is absent on purpose: it has no public comments. Threads covers both replies and mentions — read comment.kind to tell them apart.",
-        displayOptions: { show: { "@version": [2], eventCategories: ["comment"] } },
+        displayOptions: { show: { "@version": [2, 4], eventCategories: ["comment"] } },
+      },
+      {
+        displayName: "Platform",
+        name: "platform",
+        type: "options",
+        options: [
+          { name: "All", value: "" },
+          { name: "Facebook", value: "facebook" },
+          { name: "Instagram", value: "instagram" },
+          { name: "Threads", value: "threads" },
+          { name: "WhatsApp", value: "whatsapp" },
+        ],
+        default: "",
+        description: "Only message and comment events from this platform trigger the workflow. Post Completed events are not filtered.",
+        displayOptions: { show: { "@version": [3, 4] } },
+      },
+      {
+        displayName: "Account",
+        name: "socialAccountId",
+        type: "options",
+        typeOptions: { loadOptionsMethod: "getAccounts", loadOptionsDependsOn: ["platform"] },
+        default: "",
+        description: "Only message and comment events on this account trigger the workflow. For comments, the account's Comments automation handler must be set to n8n in Postora (Messaging → Automation), otherwise no comment events are sent.",
+        displayOptions: { show: { "@version": [3, 4] } },
       },
       {
         // The flat list version 1 workflows still read. Version 2 nodes created from the
