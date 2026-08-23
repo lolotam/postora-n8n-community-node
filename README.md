@@ -166,12 +166,12 @@ reply, or mention arrives on a connected Facebook, Instagram, or Threads account
 Messaging page → **Auto Replies** → **Automation**, and set **Comments** to **n8n** for that
 account. Registering the trigger alone does not start delivery.
 
-**Threads needs one more step, done once per Meta app, not in n8n.** Threads has no per-account
-webhook subscription, so nothing reaches Postora until the app itself is subscribed: Meta App
-Dashboard → the Threads use case → **Webhooks**, set the callback URL to your Postora deployment's
-`/functions/v1/threads-webhook`, verify it, and subscribe **both** the `mentions` and `replies`
-fields. Subscribing `mentions` alone delivers mentions only; direct replies to your own posts
-arrive on `replies`.
+**Threads needs nothing in the Meta App Dashboard.** Postora polls the Threads API itself
+(every two minutes) for new replies under your recent posts and for new mentions, and sends
+each one as `comment.received` — Meta's Threads Webhooks product has never reliably delivered
+replies, and it has no `mentions` webhook field at all (`threads_manage_mentions` only unlocks
+a read). The poll starts on the first comment after the account's Comments automation handler
+is set to n8n; older comments are recorded but not replayed into your workflow.
 
 Comments authored by the connected account itself are never delivered. Without that
 suppression an auto-reply workflow would receive its own reply as a new comment and answer
