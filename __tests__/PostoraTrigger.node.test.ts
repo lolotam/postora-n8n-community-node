@@ -78,6 +78,32 @@ function createHookContext(overrides: {
 }
 
 describe("Postora Trigger", () => {
+  it("keeps the version 3 Events list as the very first property", () => {
+    // The test below finds that list by name, which would still pass if something were
+    // inserted ahead of it. n8n picks the FIRST property named "Events" to build the
+    // triggers side panel, so position is the actual constraint -- and it is easy to break
+    // by adding a notice or a field at the top of the array.
+    const trigger = new PostoraTrigger();
+    const first = trigger.description.properties?.[0] as any;
+
+    expect(first.displayName).toBe("Events");
+    expect(first.name).toBe("events");
+    expect(first.type).toBe("multiOptions");
+  });
+
+  it("shows an activation notice without displacing the Events list", () => {
+    const trigger = new PostoraTrigger();
+    const properties = trigger.description.properties ?? [];
+    const noticeIndex = properties.findIndex((property) => property.name === "activationNotice");
+    const eventsIndex = properties.findIndex((property) => property.displayName === "Events");
+
+    expect(noticeIndex).toBeGreaterThan(eventsIndex);
+    expect((properties[noticeIndex] as any).type).toBe("notice");
+    // Users read "Test workflow" as "the trigger is set up"; it registers a subscription
+    // and deletes it when the editor stops listening.
+    expect((properties[noticeIndex] as any).displayName).toMatch(/Save and Activate/);
+  });
+
   it("lists the nine unified triggers the n8n side panel should offer, in order", () => {
     // n8n builds the panel from the FIRST property named "Events", ignoring @version, so the
     // version 3 list has to come first in the properties array or the panel would still show

@@ -352,6 +352,26 @@ If you already uploaded file(s) with a **Media → Upload** step (e.g. earlier i
 
 ## Troubleshooting
 
+### The trigger fired while I was testing, then stopped
+
+**Test workflow** listens only while that editor tab is open. It registers a subscription
+with Postora when you press it and deletes it again the moment the editor stops listening,
+so events arrive during the test and nothing arrives afterwards. There is no error, because
+from Postora's side there is simply no subscriber any more.
+
+**Fix:** **Save** the workflow and toggle it **Active**. To confirm it took, open
+**API Keys** in Postora — the *Webhook Subscriptions* card lists everything currently
+registered for your account. An empty card means nothing is listening.
+
+### The trigger never fires at all
+
+Check the same *Webhook Subscriptions* card first, then **Connection Health**. Each
+messaging account there shows its **webhook identity** — the id the platform actually uses
+to address it — and when it last received an inbound event. An account reading *"Never
+received an inbound event"* is usually not the account being messaged: Instagram in
+particular issues several ids per account, and it is easy to connect one profile while
+messaging another.
+
 ### "Could not find any entity of type BinaryDataFile matching..."
 
 This error comes from n8n itself, not from this node — it means n8n can no longer find the actual file bytes for a binary field on the item you're processing.
