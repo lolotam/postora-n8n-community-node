@@ -273,6 +273,21 @@ class PostoraTrigger {
                     displayOptions: { show: { "@version": [3, 4] } },
                 },
                 {
+                    // Deliberately NOT first in this array. n8n builds the triggers side panel from the
+                    // first property named "Events" regardless of @version, so anything placed ahead of
+                    // that list would take its place and empty the panel.
+                    //
+                    // Why it exists: activating a workflow is what registers the subscription with
+                    // Postora. "Test workflow" registers one too, then deletes it the moment the editor
+                    // stops listening, so a user who only ever tests sees their events arrive live and
+                    // then nothing at all afterwards -- with no error, because from Postora's side there
+                    // is simply no subscriber. That mismatch cost a support investigation on 2026-08-24.
+                    displayName: "Test workflow only listens while this editor tab is open. Save and Activate the workflow to receive events continuously.",
+                    name: "activationNotice",
+                    type: "notice",
+                    default: "",
+                },
+                {
                     // The flat list version 1 workflows still read. Version 2 nodes created from the
                     // side panel also stored their one event here, which resolveSubscribedEvents honours.
                     displayName: "Events",
