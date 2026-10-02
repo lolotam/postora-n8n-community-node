@@ -3,7 +3,7 @@ export declare class PostoraApi implements ICredentialType {
     name: string;
     displayName: string;
     documentationUrl: string;
-    icon: "file:postora.png";
+    icon: "file:../nodes/Postora/postora.svg";
     properties: INodeProperties[];
     authenticate: IAuthenticateGeneric;
     test: ICredentialTestRequest;

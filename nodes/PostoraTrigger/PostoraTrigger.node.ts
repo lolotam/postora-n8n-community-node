@@ -8,6 +8,7 @@ import {
   IWebhookFunctions,
   IWebhookResponseData,
   NodeConnectionTypes,
+  NodeOperationError,
 } from "n8n-workflow";
 import {
   isAlreadyGone,
@@ -44,7 +45,7 @@ function resolveSubscribedEvents(context: IHookFunctions): string[] {
   if (typeVersion === 1) return events;
   if (typeVersion === 3) {
     if (events.length > 0) return events;
-    throw new Error("Select at least one Event before activating the Postora Trigger.");
+    throw new NodeOperationError(context.getNode(), "Select at least one Event before activating the Postora Trigger.");
   }
 
   const categories = context.getNodeParameter("eventCategories", []) as string[];
@@ -57,7 +58,8 @@ function resolveSubscribedEvents(context: IHookFunctions): string[] {
   // every category does fall back to it again rather than erroring.
   if (events.length > 0) return events;
 
-  throw new Error(
+  throw new NodeOperationError(
+    context.getNode(),
     "Select at least one Event Category, and at least one platform inside it, before activating the Postora Trigger.",
   );
 }
@@ -121,10 +123,11 @@ export class PostoraTrigger implements INodeType {
   description: INodeTypeDescription = {
     displayName: "Postora Trigger",
     name: "postoraTrigger",
-    icon: "fa:bolt",
+    icon: "file:../Postora/postora.svg",
     group: ["trigger"],
     version: [1, 2, 3, 4],
     defaultVersion: 4,
+    subtitle: '={{ ($parameter["eventCategories"] || $parameter["events"] || []).join(", ") }}',
     description: "Starts a workflow when Postora sends an event",
     defaults: {
       name: "Postora Trigger",
@@ -154,39 +157,6 @@ export class PostoraTrigger implements INodeType {
         name: "events",
         type: "multiOptions",
         options: [
-          // ── Post publishing ──
-          {
-            name: "Post Completed",
-            value: "post.completed",
-            action: "Post Completed",
-            description: "A scheduled or queued Postora post finished publishing",
-          },
-          // ── Direct messages ──
-          {
-            name: "DM Message (All Platforms)",
-            value: "message.received",
-            action: "DM Message (All Platforms)",
-            description: "A direct message reached WhatsApp, Instagram or Facebook",
-          },
-          {
-            name: "DM Message (WhatsApp)",
-            value: "message.whatsapp",
-            action: "DM Message (WhatsApp)",
-            description: "A message reached a connected WhatsApp account",
-          },
-          {
-            name: "DM Message (Facebook)",
-            value: "message.facebook",
-            action: "DM Message (Facebook)",
-            description: "A direct message reached a connected Facebook Page",
-          },
-          {
-            name: "DM Message (Instagram)",
-            value: "message.instagram",
-            action: "DM Message (Instagram)",
-            description: "A direct message reached a connected Instagram account",
-          },
-          // ── Comments & mentions ──
           {
             name: "Comment (All Platforms)",
             value: "comment.received",
@@ -204,6 +174,36 @@ export class PostoraTrigger implements INodeType {
             value: "comment.instagram",
             action: "Comment (Instagram)",
             description: "A comment was posted on a connected Instagram post",
+          },
+          {
+            name: "DM Message (All Platforms)",
+            value: "message.received",
+            action: "DM Message (All Platforms)",
+            description: "A direct message reached WhatsApp, Instagram or Facebook",
+          },
+          {
+            name: "DM Message (Facebook)",
+            value: "message.facebook",
+            action: "DM Message (Facebook)",
+            description: "A direct message reached a connected Facebook Page",
+          },
+          {
+            name: "DM Message (Instagram)",
+            value: "message.instagram",
+            action: "DM Message (Instagram)",
+            description: "A direct message reached a connected Instagram account",
+          },
+          {
+            name: "DM Message (WhatsApp)",
+            value: "message.whatsapp",
+            action: "DM Message (WhatsApp)",
+            description: "A message reached a connected WhatsApp account",
+          },
+          {
+            name: "Post Completed",
+            value: "post.completed",
+            action: "Post Completed",
+            description: "A scheduled or queued Postora post finished publishing",
           },
           {
             name: "Reply / Mention (Threads)",
@@ -284,7 +284,7 @@ export class PostoraTrigger implements INodeType {
         displayOptions: { show: { "@version": [3] } },
       },
       {
-        displayName: "Account",
+        displayName: "Account Name or ID",
         name: "socialAccountId",
         type: "options",
         typeOptions: {
@@ -292,7 +292,8 @@ export class PostoraTrigger implements INodeType {
           loadOptionsDependsOn: ["platform", "eventCategories", "messageEvents", "commentEvents"],
         },
         default: "",
-        description: "Only message and comment events on this account trigger the workflow. The list follows the platforms selected above. For comments, the account's Comments automation handler must be set to n8n in Postora (Messaging → Automation), otherwise no comment events are sent.",
+        description:
+          'Only message and comment events on this account trigger the workflow. The list follows the platforms selected above. For comments, the account\'s Comments automation handler must be set to n8n in Postora (Messaging → Automation), otherwise no comment events are sent. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
         displayOptions: { show: { "@version": [3, 4] } },
       },
       {
@@ -319,31 +320,6 @@ export class PostoraTrigger implements INodeType {
         type: "multiOptions",
         options: [
           {
-            name: "Post Completed",
-            value: "post.completed",
-            action: "Post Completed",
-          },
-          {
-            name: "Message Received (All Platforms)",
-            value: "message.received",
-            action: "Message Received (All Platforms)",
-          },
-          {
-            name: "Message Received (WhatsApp)",
-            value: "message.whatsapp",
-            action: "Message Received (WhatsApp)",
-          },
-          {
-            name: "Message Received (Facebook)",
-            value: "message.facebook",
-            action: "Message Received (Facebook)",
-          },
-          {
-            name: "Message Received (Instagram)",
-            value: "message.instagram",
-            action: "Message Received (Instagram)",
-          },
-          {
             name: "Comment Received (All Platforms)",
             value: "comment.received",
             action: "Comment Received (All Platforms)",
@@ -362,6 +338,31 @@ export class PostoraTrigger implements INodeType {
             name: "Comment Received (Threads)",
             value: "comment.threads",
             action: "Comment Received (Threads)",
+          },
+          {
+            name: "Message Received (All Platforms)",
+            value: "message.received",
+            action: "Message Received (All Platforms)",
+          },
+          {
+            name: "Message Received (Facebook)",
+            value: "message.facebook",
+            action: "Message Received (Facebook)",
+          },
+          {
+            name: "Message Received (Instagram)",
+            value: "message.instagram",
+            action: "Message Received (Instagram)",
+          },
+          {
+            name: "Message Received (WhatsApp)",
+            value: "message.whatsapp",
+            action: "Message Received (WhatsApp)",
+          },
+          {
+            name: "Post Completed",
+            value: "post.completed",
+            action: "Post Completed",
           },
         ],
         default: [],
@@ -388,7 +389,7 @@ export class PostoraTrigger implements INodeType {
         const accounts: Array<{ id: string; platform: string; platform_username?: string | null; name?: string | null }> =
           Array.isArray(response?.accounts) ? response.accounts : [];
         return [
-          { name: "All accounts", value: "" },
+          { name: "All Accounts", value: "" },
           ...accounts
             .filter((account) => platforms.includes(account.platform))
             .map((account) => ({
@@ -423,9 +424,10 @@ export class PostoraTrigger implements INodeType {
         let listing: WebhookListing;
         try {
           listing = await listWebhooks(this, credentials.baseUrl);
-        } catch {
+        } catch (error) {
           // Postora being unreachable is not evidence the registration is gone, and
           // re-registering on every transient error would pile up duplicates.
+          this.logger?.warn("Postora unreachable during checkExists — assuming webhook still registered", { error });
           return true;
         }
 
@@ -452,8 +454,10 @@ export class PostoraTrigger implements INodeType {
             // across the edit would run this workflow twice. Refuse to re-register rather
             // than leave two live subscriptions behind.
             if (!isAlreadyGone(error)) {
-              throw new Error(
+              throw new NodeOperationError(
+                this.getNode(),
                 `Postora could not retire the previous webhook subscription (${webhookId}), so re-registering would deliver some events twice. Resolve the Postora API error and activate again.`,
+                { description: error instanceof Error ? error.message : String(error) },
               );
             }
           }
@@ -466,7 +470,7 @@ export class PostoraTrigger implements INodeType {
         const events = resolveSubscribedEvents(this);
         const callbackUrl = this.getNodeWebhookUrl("default");
         if (!callbackUrl) {
-          throw new Error("Postora webhook registration requires an n8n callback URL.");
+          throw new NodeOperationError(this.getNode(), "Postora webhook registration requires an n8n callback URL.");
         }
         const registration = await this.helpers.httpRequestWithAuthentication.call(
           this as unknown as IAllExecuteFunctions,

@@ -10,7 +10,9 @@ import {
   INodeProperties,
   NodeConnectionTypes,
   NodeApiError,
+  NodeOperationError,
   JsonObject,
+  INode,
 } from "n8n-workflow";
 
 // n8n's own binary storage (mode: "database"/"filesystem") can lose track of a
@@ -61,7 +63,12 @@ function normalizeList(input: string | string[] | undefined | null): string[] {
 // Throws a clear, field-named error for a visible required parameter that came
 // back empty — so users see "Required parameter 'X' is empty" instead of n8n's
 // generic "Could not get parameter" when a field is hidden/blank.
-function requireParam(value: any, label: string, jsonPath?: string, triggerName?: string): any {
+function requireParam(
+  node: INode,
+  value: any,
+  label: string,
+  trigger?: { jsonPath: string; triggerName: string },
+): any {
   const isEmpty =
     value === undefined ||
     value === null ||
@@ -73,13 +80,14 @@ function requireParam(value: any, label: string, jsonPath?: string, triggerName?
   // between the trigger and this node and the default silently resolves to nothing, which is
   // the single most common way this error is reached. Say so, rather than telling someone to
   // fill in a field they can see is already filled in.
-  const hint = jsonPath && triggerName
-    ? ` If the field still holds its default \`{{ $json.${jsonPath} }}\` and another node sits between the` +
+  const hint = trigger
+    ? ` If the field still holds its default \`{{ $json.${trigger.jsonPath} }}\` and another node sits between the` +
       ` trigger and this one, \`$json\` is that node's output instead of the trigger's. Reference the trigger` +
-      ` directly: \`{{ $('${triggerName}').first().json.${jsonPath} }}\`, using the trigger's name` +
+      ` directly: \`{{ $('${trigger.triggerName}').first().json.${trigger.jsonPath} }}\`, using the trigger's name` +
       ` as it appears on your canvas.`
     : "";
-  throw new Error(
+  throw new NodeOperationError(
+    node,
     `Required parameter '${label}' is missing or empty. Open the node and fill in the '${label}' field, then run again.${hint}`,
   );
 }
@@ -95,9 +103,10 @@ function isValidUuid(value: string): boolean {
 // where the uuid column raises a type error the caller reads as a server fault. Name
 // the mistake before the request leaves n8n. `alsoNot` is the id most often confused
 // with the account's, which differs between a DM and a comment.
-function requireAccountUuid(value: string, alsoNot: string): string {
+function requireAccountUuid(node: INode, value: string, alsoNot: string): string {
   if (isValidUuid(value)) return value;
-  throw new Error(
+  throw new NodeOperationError(
+    node,
     `'${value}' is not a Postora account UUID. Social Account ID must be the \`social_account_id\` ` +
       `from the trigger payload — not the Instagram/Facebook numeric ID, not ${alsoNot}, and not the ` +
       `username. Run Resource = Account, Operation = List with this credential to see the UUIDs it can use.`,
@@ -108,9 +117,10 @@ function requireAccountUuid(value: string, alsoNot: string): string {
 // with its `postid_commentid` underscore, or pinned test data left over from a manual run — is
 // accepted by Postora and rejected by Threads as "Param reply_to_id is not a valid threads_media
 // ID" once the reply has already been published as far as the container step. Name it here.
-function requireThreadsMediaId(commentId: string): string {
+function requireThreadsMediaId(node: INode, commentId: string): string {
   if (/^\d+$/.test(commentId)) return commentId;
-  throw new Error(
+  throw new NodeOperationError(
+    node,
     `'${commentId}' is not a Threads comment ID. Threads IDs are digits only — use \`comment.id\` ` +
       `from a Threads \`comment.received\` payload. A Facebook comment ID (postid_commentid) or ` +
       `left-over test data cannot be replied to on Threads.`,
@@ -134,10 +144,10 @@ function detectCommentPlatform(ctx: IExecuteFunctions, itemIndex: number): strin
 }
 
 const mediaSourceOptions = [
-  { name: "None (text-only post)", value: "none" },
-  { name: "URL (paste https:// links)", value: "url" },
-  { name: "Binary Data (from n8n node)", value: "binary" },
-  { name: "Media File ID (UUIDs from Upload)", value: "mediafileid" },
+  { name: "None (Text-Only Post)", value: "none" },
+  { name: "URL (Paste https:// Links)", value: "url" },
+  { name: "Binary Data (From a Previous Node)", value: "binary" },
+  { name: "Media File ID (UUIDs From Upload)", value: "mediafileid" },
 ];
 
 const storyMediaSourceOptions = mediaSourceOptions.filter((option) => option.value !== "none");
@@ -158,7 +168,7 @@ async function readBinaryOrThrow(
     const buffer = await ctx.helpers.getBinaryDataBuffer(itemIndex, propertyName);
     return { binaryData, buffer };
   } catch (error: any) {
-    throw new Error(describeBinaryError(error, propertyName));
+    throw new NodeOperationError(ctx.getNode(), describeBinaryError(error, propertyName));
   }
 }
 
@@ -226,14 +236,14 @@ async function fetchFollowingSafeRedirects(
     try {
       parsed = new URL(currentUrl);
     } catch {
-      throw new Error(`'${currentUrl}' is not a valid URL.`);
+      throw new NodeOperationError(ctx.getNode(), `'${currentUrl}' is not a valid URL.`);
     }
 
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      throw new Error(`'${currentUrl}' uses an unsupported scheme. Only http and https are allowed.`);
+      throw new NodeOperationError(ctx.getNode(), `'${currentUrl}' uses an unsupported scheme. Only http and https are allowed.`);
     }
     if (isPrivateOrReservedHost(parsed.hostname)) {
-      throw new Error(`URL host '${parsed.hostname}' is not allowed (private/loopback/reserved).`);
+      throw new NodeOperationError(ctx.getNode(), `URL host '${parsed.hostname}' is not allowed (private/loopback/reserved).`);
     }
 
     let res: any;
@@ -249,7 +259,7 @@ async function fetchFollowingSafeRedirects(
         timeout: timeoutMs,
       });
     } catch (err: any) {
-      throw new Error(`Failed to download '${currentUrl}': ${err?.message || String(err)}`);
+      throw new NodeOperationError(ctx.getNode(), `Failed to download '${currentUrl}': ${err?.message || String(err)}`);
     }
 
     const statusCode = res.statusCode || 200;
@@ -267,7 +277,7 @@ async function fetchFollowingSafeRedirects(
     };
   }
 
-  throw new Error(`'${startUrl}' redirected more than ${MAX_REDIRECTS} times.`);
+  throw new NodeOperationError(ctx.getNode(), `'${startUrl}' redirected more than ${MAX_REDIRECTS} times.`);
 }
 
 // SSRF-safe download of a single media URL. Returns the raw buffer plus an inferred
@@ -282,14 +292,14 @@ async function safeFetchAndStage(
   try {
     parsed = new URL(url);
   } catch {
-    throw new Error(`'${url}' is not a valid URL.`);
+    throw new NodeOperationError(ctx.getNode(), `'${url}' is not a valid URL.`);
   }
 
   const MAX_BYTES = 50 * 1024 * 1024; // 50 MB
   const res = await fetchFollowingSafeRedirects(ctx, url, 30_000);
 
   if (res.statusCode < 200 || res.statusCode >= 300) {
-    throw new Error(`Download of '${url}' failed with HTTP ${res.statusCode}.`);
+    throw new NodeOperationError(ctx.getNode(), `Download of '${url}' failed with HTTP ${res.statusCode}.`);
   }
 
   const headers = Object.keys(res.headers).reduce<Record<string, string>>((acc, key) => {
@@ -299,19 +309,20 @@ async function safeFetchAndStage(
 
   const contentType = (headers["content-type"] || "").toLowerCase();
   if (!contentType.startsWith("image/") && !contentType.startsWith("video/")) {
-    throw new Error(
+    throw new NodeOperationError(
+      ctx.getNode(),
       `'${url}' returned Content-Type '${contentType || "(none)"}'. Only image/* and video/* are accepted.`,
     );
   }
 
   const contentLength = parseInt(headers["content-length"] || "0", 10);
   if (contentLength && contentLength > MAX_BYTES) {
-    throw new Error(`'${url}' is too large (${contentLength} bytes > ${MAX_BYTES} byte limit).`);
+    throw new NodeOperationError(ctx.getNode(), `'${url}' is too large (${contentLength} bytes > ${MAX_BYTES} byte limit).`);
   }
 
   const buffer = res.body;
   if (buffer.byteLength > MAX_BYTES) {
-    throw new Error(`'${url}' exceeded the ${MAX_BYTES}-byte download limit during transfer.`);
+    throw new NodeOperationError(ctx.getNode(), `'${url}' exceeded the ${MAX_BYTES}-byte download limit during transfer.`);
   }
 
   // Filename: Content-Disposition → URL basename → fallback by mime
@@ -345,11 +356,11 @@ const platformOptions = [
   // { name: '10. Reddit (Coming Soon)', value: 'reddit' },
 ];
 
-function parseLinkedInAccountSelections(values: string[]) {
+function parseLinkedInAccountSelections(node: INode, values: string[]) {
   return values.map((value) => {
     const [accountId, destinationId] = value.split("|");
     if (!accountId || !destinationId) {
-      throw new Error(`Invalid LinkedIn account selection: ${value}`);
+      throw new NodeOperationError(node, `Invalid LinkedIn account selection: ${value}`);
     }
     return { account_id: accountId, destination_id: destinationId };
   });
@@ -359,7 +370,7 @@ export class Postora implements INodeType {
   description: INodeTypeDescription = {
     displayName: "Postora",
     name: "postora",
-    icon: "file:postora.png",
+    icon: "file:postora.svg",
     group: ["transform"],
     version: 1,
     subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',
@@ -464,7 +475,7 @@ export class Postora implements INodeType {
         name: "commentPlatform",
         type: "options",
         options: [
-          { name: "Auto-detect", value: "auto" },
+          { name: "Auto-Detect", value: "auto" },
           { name: "Facebook", value: "facebook" },
           { name: "Instagram", value: "instagram" },
           { name: "Threads", value: "threads" },
@@ -561,7 +572,7 @@ export class Postora implements INodeType {
         name: "messagePlatform",
         type: "options",
         options: [
-          { name: "Auto-detect", value: "auto" },
+          { name: "Auto-Detect", value: "auto" },
           { name: "WhatsApp", value: "whatsapp" },
           { name: "Instagram", value: "instagram" },
           { name: "Facebook", value: "facebook" },
@@ -580,7 +591,7 @@ export class Postora implements INodeType {
         default: "={{ $json.social_account_id ?? $('Postora Trigger').first().json.social_account_id }}",
         required: true,
         description:
-          "The Postora account UUID (social_accounts.id) that will send the reply. Not the Instagram/Facebook numeric ID, not sender.id, not the username. Run Resource = Account, Operation = List to see the UUIDs this credential can use.",
+          "The Postora account UUID that will send the reply. Not the Instagram/Facebook numeric ID, not the sender's platform ID, not the username. Run Resource = Account, Operation = List to see the UUIDs this credential can use.",
         displayOptions: { show: { resource: ["message"], operation: ["send", "reply"] } },
       },
       {
@@ -651,7 +662,7 @@ export class Postora implements INodeType {
       ...platformOptions.map(
         (p) =>
           ({
-            displayName: "Social Accounts",
+            displayName: "Social Account Names or IDs",
             name: `socialAccounts_${p.value}`,
             type: "multiOptions",
             noDataExpression: true,
@@ -661,7 +672,7 @@ export class Postora implements INodeType {
             default: [],
             required: true,
             displayOptions: { show: { resource: ["post"], operation: ["create"], platform: [p.value] } },
-            description: `Select ${p.name.replace(/^\d+\.\s*/, "")} accounts to post to`,
+            description: `Select ${p.name.replace(/^\d+\.\s*/, "")} accounts to post to. Choose from the list, or specify IDs using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.`,
           }) as INodeProperties,
       ),
       {
@@ -811,7 +822,7 @@ export class Postora implements INodeType {
             type: "string",
             typeOptions: { rows: 3 },
             default: "",
-            description: "📝 Auto-post a first comment after publishing.",
+            description: "📝 Auto-post a first comment after publishing",
           },
         ],
       },
@@ -833,7 +844,7 @@ export class Postora implements INodeType {
             type: "string",
             typeOptions: { rows: 3 },
             default: "",
-            description: "📝 Auto-post a first comment after publishing.",
+            description: "📝 Auto-post a first comment after publishing",
           },
         ],
       },
@@ -853,7 +864,7 @@ export class Postora implements INodeType {
             name: "youtubeTitle",
             type: "string",
             default: "",
-            description: "🎬 Title for YouTube videos.",
+            description: "🎬 Title for YouTube videos",
           },
           {
             displayName: "YouTube Visibility",
@@ -865,14 +876,14 @@ export class Postora implements INodeType {
               { name: "Private", value: "private" },
             ],
             default: "public",
-            description: "🔒 YouTube video visibility setting.",
+            description: "🔒 YouTube video visibility setting",
           },
           {
             displayName: "YouTube Category",
             name: "youtubeCategory",
             type: "string",
             default: "22",
-            description: "📂 YouTube category ID (default: 22 — People & Blogs).",
+            description: "📂 YouTube category ID (default: 22 — People & Blogs)",
           },
           {
             displayName: "First Comment",
@@ -880,7 +891,7 @@ export class Postora implements INodeType {
             type: "string",
             typeOptions: { rows: 3 },
             default: "",
-            description: "📝 Auto-post a first comment after publishing.",
+            description: "📝 Auto-post a first comment after publishing",
           },
         ],
       },
@@ -906,28 +917,28 @@ export class Postora implements INodeType {
               { name: "Only Me", value: "SELF_ONLY" },
             ],
             default: "PUBLIC_TO_EVERYONE",
-            description: "🔒 TikTok video privacy level.",
+            description: "🔒 TikTok video privacy level",
           },
           {
             displayName: "TikTok Allow Comments",
             name: "tiktokAllowComments",
             type: "boolean",
             default: false,
-            description: "💬 Allow comments on TikTok video.",
+            description: "Whether to allow comments on the TikTok video",
           },
           {
             displayName: "TikTok Allow Duet",
             name: "tiktokAllowDuet",
             type: "boolean",
             default: false,
-            description: "🎭 Allow duets on TikTok video.",
+            description: "Whether to allow duets on the TikTok video",
           },
           {
             displayName: "TikTok Allow Stitch",
             name: "tiktokAllowStitch",
             type: "boolean",
             default: false,
-            description: "✂️ Allow stitches on TikTok video.",
+            description: "Whether to allow stitches on the TikTok video",
           },
         ],
       },
@@ -948,7 +959,7 @@ export class Postora implements INodeType {
             type: "string",
             typeOptions: { rows: 3 },
             default: "",
-            description: "📝 Auto-post a first comment after publishing.",
+            description: "📝 Auto-post a first comment after publishing",
           },
         ],
       },
@@ -968,14 +979,14 @@ export class Postora implements INodeType {
             name: "pinterestBoardId",
             type: "string",
             default: "",
-            description: "📌 Pinterest board to pin to.",
+            description: "📌 Pinterest board to pin to",
           },
           {
             displayName: "Pinterest Title",
             name: "pinterestTitle",
             type: "string",
             default: "",
-            description: "📌 Title for the Pinterest pin.",
+            description: "📌 Title for the Pinterest pin",
           },
         ],
       },
@@ -996,7 +1007,7 @@ export class Postora implements INodeType {
             type: "string",
             typeOptions: { rows: 3 },
             default: "",
-            description: "📝 Auto-post a first comment after publishing.",
+            description: "📝 Auto-post a first comment after publishing",
           },
         ],
       },
@@ -1016,14 +1027,14 @@ export class Postora implements INodeType {
             name: "redditSubreddit",
             type: "string",
             default: "",
-            description: "📋 Subreddit name (without r/).",
+            description: "📋 Subreddit name (without r/)",
           },
           {
             displayName: "Reddit Title",
             name: "redditTitle",
             type: "string",
             default: "",
-            description: "📋 Title for the Reddit post.",
+            description: "📋 Title for the Reddit post",
           },
         ],
       },
@@ -1051,10 +1062,10 @@ export class Postora implements INodeType {
         displayOptions: { show: { resource: ["post"], operation: ["list"] } },
         options: [
           { name: "All", value: "" },
-          { name: "Pending", value: "pending" },
-          { name: "Processing", value: "processing" },
           { name: "Completed", value: "completed" },
           { name: "Failed", value: "failed" },
+          { name: "Pending", value: "pending" },
+          { name: "Processing", value: "processing" },
         ],
         default: "",
       },
@@ -1062,8 +1073,9 @@ export class Postora implements INodeType {
         displayName: "Limit",
         name: "limit",
         type: "number",
+        description: "Max number of results to return",
         typeOptions: { minValue: 1, maxValue: 100 },
-        default: 20,
+        default: 50,
         displayOptions: { show: { resource: ["post"], operation: ["list"] } },
       },
       {
@@ -1072,29 +1084,30 @@ export class Postora implements INodeType {
         type: "options",
         options: [
           { name: "All", value: "" },
+          { name: "Bluesky", value: "bluesky" },
           { name: "Facebook", value: "facebook" },
           { name: "Instagram", value: "instagram" },
-          { name: "TikTok", value: "tiktok" },
-          { name: "YouTube", value: "youtube" },
           { name: "LinkedIn", value: "linkedin" },
-          { name: "X (Twitter)", value: "twitter" },
           { name: "Pinterest", value: "pinterest" },
-          { name: "Threads", value: "threads" },
-          { name: "Bluesky", value: "bluesky" },
           { name: "Reddit", value: "reddit" },
+          { name: "Threads", value: "threads" },
+          { name: "TikTok", value: "tiktok" },
+          { name: "X (Twitter)", value: "twitter" },
+          { name: "YouTube", value: "youtube" },
         ],
         default: "",
         displayOptions: { show: { resource: ["post"], operation: ["list"] } },
         description: "Filter posts by platform",
       },
       {
-        displayName: "Account Filter",
+        displayName: "Account Filter Name or ID",
         name: "accountFilter",
         type: "options",
         typeOptions: { loadOptionsMethod: "getAccountsForListFilter", loadOptionsDependsOn: ["platformFilter"] },
         default: "",
         displayOptions: { show: { resource: ["post"], operation: ["list"] } },
-        description: "Filter posts by a specific social account",
+        description:
+          'Filter posts by a specific social account. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
       },
       {
         displayName: "Date From",
@@ -1121,9 +1134,9 @@ export class Postora implements INodeType {
         name: "uploadMediaSource",
         type: "options",
         options: [
-          { name: "Binary Property (from n8n node)", value: "binary" },
-          { name: "URL (download from https://)", value: "url" },
-          { name: "Media File ID (UUID lookup, no re-upload)", value: "mediafileid" },
+          { name: "Binary Property (From a Previous Node)", value: "binary" },
+          { name: "URL (Download From https://)", value: "url" },
+          { name: "Media File ID (UUID Lookup, No Re-Upload)", value: "mediafileid" },
         ],
         default: "binary",
         displayOptions: { show: { resource: ["media"], operation: ["upload"] } },
@@ -1139,7 +1152,7 @@ export class Postora implements INodeType {
         default: "data",
         displayOptions: { show: { resource: ["media"], operation: ["upload"], uploadMediaSource: ["binary"] } },
         description:
-          "Name of the binary property containing the file to upload. For multiple files, use comma-separated names (e.g. 'IMAGE, VIDEO_')",
+          "Name of the binary property containing the file to upload. For multiple files, use comma-separated names (e.g. 'IMAGE, VIDEO_').",
       },
       {
         displayName: "Media URLs",
@@ -1149,7 +1162,7 @@ export class Postora implements INodeType {
         typeOptions: { multipleValues: false },
         displayOptions: { show: { resource: ["media"], operation: ["upload"], uploadMediaSource: ["url"] } },
         description:
-          "🔗 One or more public URLs (http/https only) to download media from. Comma-separated, or use an expression returning an array (e.g. ={{ $json.urls }}).",
+          "🔗 One or more public URLs (http/https only) to download media from. Comma-separated, or use an expression that returns an array of links.",
       },
       {
         displayName: "Media File ID(s)",
@@ -1207,6 +1220,7 @@ export class Postora implements INodeType {
         description: "The ID of the webhook to delete",
       },
     ],
+      usableAsTool: true,
   };
 
   methods = {
@@ -1322,19 +1336,20 @@ export class Postora implements INodeType {
         // ── Message → Send / Reply ──
         else if (resource === "message" && ["send", "reply"].includes(operation)) {
           const socialAccountId = requireAccountUuid(
+            this.getNode(),
             requireParam(
+              this.getNode(),
               this.getNodeParameter("messageSocialAccountId", i, "") as string,
               "Social Account ID",
-              "social_account_id",
-              "Postora Trigger",
+              { jsonPath: "social_account_id", triggerName: "Postora Trigger" },
             ),
             "`sender.id`",
           );
           const recipientId = requireParam(
+            this.getNode(),
             this.getNodeParameter("messageRecipientId", i, "") as string,
             "Recipient ID / Phone",
-            "sender.id",
-            "Postora Trigger",
+            { jsonPath: "sender.id", triggerName: "Postora Trigger" },
           );
           const messageType = this.getNodeParameter("messageType", i, "text") as string;
           const messageText = this.getNodeParameter("messageText", i, "") as string;
@@ -1347,7 +1362,7 @@ export class Postora implements INodeType {
           const platform = this.getNodeParameter("messagePlatform", i, "auto") as string;
           if (platform !== "auto") messageBody.platform = platform;
           if (messageType === "media") {
-            messageBody.media_url = requireParam(this.getNodeParameter("messageMediaUrl", i, "") as string, "Media URL");
+            messageBody.media_url = requireParam(this.getNode(), this.getNodeParameter("messageMediaUrl", i, "") as string, "Media URL");
             messageBody.media_type = this.getNodeParameter("messageMediaType", i, "image") as string;
           }
           responseData = await this.helpers.httpRequestWithAuthentication.call(
@@ -1370,31 +1385,32 @@ export class Postora implements INodeType {
           // Threads only lets an account delete its own posts, so deleting someone else's
           // reply is refused upstream. Say so here instead of surfacing a raw API error.
           if (operation === "delete" && resolvedPlatform === "threads") {
-            throw new Error("Threads replies cannot be deleted. Use the Hide operation instead.");
+            throw new NodeOperationError(this.getNode(), "Threads replies cannot be deleted. Use the Hide operation instead.", { itemIndex: i });
           }
           const commentAccountId = requireAccountUuid(
+            this.getNode(),
             requireParam(
+              this.getNode(),
               this.getNodeParameter("commentSocialAccountId", i, "") as string,
               "Social Account ID",
-              "social_account_id",
-              "Postora Trigger",
+              { jsonPath: "social_account_id", triggerName: "Postora Trigger" },
             ),
             "the comment author's ID",
           );
           const commentId = requireParam(
+            this.getNode(),
             this.getNodeParameter("commentId", i, "") as string,
             "Comment ID",
-            "comment.id",
-            "Postora Trigger",
+            { jsonPath: "comment.id", triggerName: "Postora Trigger" },
           );
           const commentBody: Record<string, unknown> = {
             social_account_id: commentAccountId,
-            comment_id: resolvedPlatform === "threads" ? requireThreadsMediaId(commentId) : commentId,
+            comment_id: resolvedPlatform === "threads" ? requireThreadsMediaId(this.getNode(), commentId) : commentId,
           };
           // Left out on Auto-detect so the API derives it from the account, as Message → Reply does.
           if (!isAutoPlatform) commentBody.platform = commentPlatform;
           if (operation === "reply") {
-            commentBody.message = requireParam(this.getNodeParameter("commentMessage", i, "") as string, "Message");
+            commentBody.message = requireParam(this.getNode(), this.getNodeParameter("commentMessage", i, "") as string, "Message");
           }
           if (operation === "hide") {
             commentBody.hide = this.getNodeParameter("commentHide", i, true) as boolean;
@@ -1413,7 +1429,7 @@ export class Postora implements INodeType {
 
         // ── Webhook → Register ──
         else if (resource === "webhook" && operation === "register") {
-          const webhookUrl = requireParam(this.getNodeParameter("webhookUrl", i, "") as string, "Webhook URL");
+          const webhookUrl = requireParam(this.getNode(), this.getNodeParameter("webhookUrl", i, "") as string, "Webhook URL");
           const webhookEvents = this.getNodeParameter("webhookEvents", i, []) as string[];
           const webhookBody: Record<string, string | string[]> = { webhook_url: webhookUrl };
           if (webhookEvents.length > 0) webhookBody.events = webhookEvents;
@@ -1444,7 +1460,7 @@ export class Postora implements INodeType {
 
         // ── Webhook → Test ──
         else if (resource === "webhook" && operation === "test") {
-          const webhookUrl = requireParam(this.getNodeParameter("webhookUrl", i, "") as string, "Webhook URL");
+          const webhookUrl = requireParam(this.getNode(), this.getNodeParameter("webhookUrl", i, "") as string, "Webhook URL");
           responseData = await this.helpers.httpRequestWithAuthentication.call(
             this as unknown as IAllExecuteFunctions,
             "postoraApi",
@@ -1459,7 +1475,7 @@ export class Postora implements INodeType {
 
         // ── Webhook → Delete ──
         else if (resource === "webhook" && operation === "delete") {
-          const webhookId = requireParam(this.getNodeParameter("webhookId", i, "") as string, "Webhook ID");
+          const webhookId = requireParam(this.getNode(), this.getNodeParameter("webhookId", i, "") as string, "Webhook ID");
           responseData = await this.helpers.httpRequestWithAuthentication.call(
             this as unknown as IAllExecuteFunctions,
             "postoraApi",
@@ -1474,13 +1490,16 @@ export class Postora implements INodeType {
         // ── Post → Create ──
         else if (resource === "post" && operation === "create") {
           const platform = requireParam(
+            this.getNode(),
             this.getNodeParameter("platform", i, "") as string,
             "Platform",
           );
 
           if (["twitter", "tiktok", "reddit"].includes(platform)) {
-            throw new Error(
+            throw new NodeOperationError(
+              this.getNode(),
               `The selected platform (${platform}) is coming soon and is not yet available for publishing.`,
+              { itemIndex: i },
             );
           }
 
@@ -1489,6 +1508,7 @@ export class Postora implements INodeType {
           // "Could not get parameter" error that masks the real cause.
           const caption = this.getNodeParameter("caption", i, "") as string;
           const socialAccounts = requireParam(
+            this.getNode(),
             this.getNodeParameter(`socialAccounts_${platform}`, i, []) as string[],
             `Social Accounts (${platform})`,
           );
@@ -1526,10 +1546,12 @@ export class Postora implements INodeType {
                 : [];
 
           if (mediaSource === "url" && mediaUrls.length === 0) {
-            throw new Error(
+            throw new NodeOperationError(
+              this.getNode(),
               "Media source is set to URL but no valid URLs were provided. " +
               "Ensure URLs are direct links to media files (e.g. https://example.com/image.jpg). " +
-              "If the Media Source field shows as a text input instead of a dropdown, click the gear icon and select 'Fixed'."
+              "If the Media Source field shows as a text input instead of a dropdown, click the gear icon and select 'Fixed'.",
+              { itemIndex: i },
             );
           }
 
@@ -1539,9 +1561,11 @@ export class Postora implements INodeType {
               : [];
 
           if (mediaSource === "mediafileid" && mediaFileIds.length === 0) {
-            throw new Error(
+            throw new NodeOperationError(
+              this.getNode(),
               "Media source is set to Media File ID but no IDs were provided. " +
-              "Enter one or more IDs returned by a previous Media → Upload step, comma-separated (e.g. id-1,id-2,id-3)."
+              "Enter one or more IDs returned by a previous Media → Upload step, comma-separated (e.g. id-1,id-2,id-3).",
+              { itemIndex: i },
             );
           }
 
@@ -1550,11 +1574,13 @@ export class Postora implements INodeType {
             if (invalid.length > 0) {
               const sample = invalid[0];
               const isUrl = /^https?:\/\//i.test(sample);
-              throw new Error(
+              throw new NodeOperationError(
+                this.getNode(),
                 `Invalid Media File ID: "${String(sample).slice(0, 80)}" is not a valid UUID.` +
                 (isUrl
                   ? " It looks like a URL — switch Media Source to \"URL\", or use the Media → Upload node first and reference the returned 'id' (a UUID like 7ee95777-...) instead of 'file_path' (the Cloudinary URL)."
                   : " Media File IDs are UUIDs returned by the Media → Upload node (e.g. 7ee95777-b5fa-41a3-b314-5d67a027e569)."),
+                { itemIndex: i },
               );
             }
           }
@@ -1567,7 +1593,7 @@ export class Postora implements INodeType {
           };
 
           if (platform === "linkedin") {
-            const linkedInDestinations = parseLinkedInAccountSelections(socialAccounts);
+            const linkedInDestinations = parseLinkedInAccountSelections(this.getNode(), socialAccounts);
             body.account_ids = [...new Set(linkedInDestinations.map((destination) => destination.account_id))];
             body.linkedin_destinations = linkedInDestinations;
           } else if (socialAccounts.length) body.account_ids = socialAccounts;
@@ -1706,9 +1732,9 @@ export class Postora implements INodeType {
 
         // ── Media → Get ──
         else if (resource === "media" && operation === "get") {
-          const mediaId = requireParam(this.getNodeParameter("mediaId", i, "") as string, "Media ID");
+          const mediaId = requireParam(this.getNode(), this.getNodeParameter("mediaId", i, "") as string, "Media ID");
           if (!isValidUuid(mediaId)) {
-            throw new Error("Invalid Media ID. Media IDs must be valid UUIDs returned by a previous Media → Upload step.");
+            throw new NodeOperationError(this.getNode(), "Invalid Media ID. Media IDs must be valid UUIDs returned by a previous Media → Upload step.", { itemIndex: i });
           }
           responseData = await this.helpers.httpRequestWithAuthentication.call(
             this as unknown as IAllExecuteFunctions,
@@ -1773,7 +1799,7 @@ export class Postora implements INodeType {
                 );
 
                 if (typeof result === "string") {
-                  try { result = JSON.parse(result); } catch (_) { /* keep as-is */ }
+                  try { result = JSON.parse(result); } catch { /* keep as-is */ }
                 }
 
                 uploadResults.push({ field: prop, success: true, ...(result as object) });
@@ -1789,8 +1815,10 @@ export class Postora implements INodeType {
               this.getNodeParameter("uploadMediaUrls", i, "") as string | string[],
             );
             if (urls.length === 0) {
-              throw new Error(
+              throw new NodeOperationError(
+                this.getNode(),
                 "Media Source is set to URL but no URLs were provided. Enter one or more public http(s) URLs (comma-separated or an array expression).",
+                { itemIndex: i },
               );
             }
 
@@ -1819,7 +1847,7 @@ export class Postora implements INodeType {
                 );
 
                 if (typeof result === "string") {
-                  try { result = JSON.parse(result); } catch (_) { /* keep as-is */ }
+                  try { result = JSON.parse(result); } catch { /* keep as-is */ }
                 }
 
                 uploadResults.push({ url, success: true, ...(result as object) });
@@ -1835,8 +1863,10 @@ export class Postora implements INodeType {
               this.getNodeParameter("uploadMediaFileIds", i, "") as string | string[],
             );
             if (rawIds.length === 0) {
-              throw new Error(
+              throw new NodeOperationError(
+                this.getNode(),
                 "Media Source is set to Media File ID but no IDs were provided. Enter one or more Postora media file UUIDs (comma-separated or an array expression).",
+                { itemIndex: i },
               );
             }
 
@@ -1860,7 +1890,7 @@ export class Postora implements INodeType {
                 continue;
               }
               try {
-                let result = await this.helpers.httpRequestWithAuthentication.call(
+                const result = await this.helpers.httpRequestWithAuthentication.call(
                   this as unknown as IAllExecuteFunctions,
                   "postoraApi",
                   {
@@ -1894,8 +1924,10 @@ export class Postora implements INodeType {
               }
             }
           } else {
-            throw new Error(
+            throw new NodeOperationError(
+              this.getNode(),
               `Unknown Media Source '${uploadSource}'. Choose Binary, URL, or Media File ID.`,
+              { itemIndex: i },
             );
           }
 
@@ -1921,6 +1953,7 @@ export class Postora implements INodeType {
           });
           continue;
         }
+        if (error instanceof NodeOperationError) throw error;
         throw new NodeApiError(this.getNode(), error as JsonObject);
       }
     }
