@@ -1,3 +1,4 @@
+import { NodeOperationError } from "n8n-workflow";
 import { Postora } from "../nodes/Postora/Postora.node";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -395,6 +396,14 @@ describe("Postora node — Webhook actions and Media → Get", () => {
         params: { resource: "media", operation: "get", mediaId: "not-a-uuid" },
       }),
     ).rejects.toThrow(/Invalid Media ID.*valid UUID/i);
+  });
+
+  it("surfaces validation failures as NodeOperationError rather than wrapping them as API errors", async () => {
+    await expect(
+      run({
+        params: { resource: "media", operation: "get", mediaId: "not-a-uuid" },
+      }),
+    ).rejects.toBeInstanceOf(NodeOperationError);
   });
 });
 

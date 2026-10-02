@@ -104,10 +104,10 @@ describe("Postora Trigger", () => {
     expect((properties[noticeIndex] as any).displayName).toMatch(/Save and Activate/);
   });
 
-  it("lists the nine unified triggers the n8n side panel should offer, in order", () => {
+  it("lists the nine unified triggers the n8n side panel should offer, alphabetized by name", () => {
     // n8n builds the panel from the FIRST property named "Events", ignoring @version, so the
     // version 3 list has to come first in the properties array or the panel would still show
-    // the version 1 list.
+    // the version 1 list. n8n's community-node lint requires multi-option items sorted by name.
     const trigger = new PostoraTrigger();
     const events = (trigger.description.properties?.find((property) => property.name === "events") as any).options;
 
@@ -115,14 +115,14 @@ describe("Postora Trigger", () => {
     // already arrives as comment.threads with comment.kind "mention", and "replied" was an
     // outbound confirmation from Postora's Mentions page, not an inbound event.
     expect(events.map((event: { value: string; action: string }) => [event.value, event.action])).toEqual([
-      ["post.completed", "Post Completed"],
-      ["message.received", "DM Message (All Platforms)"],
-      ["message.whatsapp", "DM Message (WhatsApp)"],
-      ["message.facebook", "DM Message (Facebook)"],
-      ["message.instagram", "DM Message (Instagram)"],
       ["comment.received", "Comment (All Platforms)"],
       ["comment.facebook", "Comment (Facebook)"],
       ["comment.instagram", "Comment (Instagram)"],
+      ["message.received", "DM Message (All Platforms)"],
+      ["message.facebook", "DM Message (Facebook)"],
+      ["message.instagram", "DM Message (Instagram)"],
+      ["message.whatsapp", "DM Message (WhatsApp)"],
+      ["post.completed", "Post Completed"],
       ["comment.threads", "Reply / Mention (Threads)"],
     ]);
   });
@@ -268,6 +268,16 @@ describe("Postora Trigger", () => {
 
     await expect(trigger.webhookMethods?.default?.checkExists.call(context as any)).resolves.toBe(true);
     expect(staticData.webhookId).toBe("subscription-123");
+  });
+
+  it("logs a warning when Postora is unreachable so the assumption shows up in n8n's logs", async () => {
+    const listingError = new Error("ECONNREFUSED");
+    const { context } = createHookContext({ staticData: { webhookId: "subscription-123" }, listingError });
+    const warn = jest.fn();
+
+    await new PostoraTrigger().webhookMethods.default.checkExists.call({ ...context, logger: { warn } } as any);
+
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/unreachable during checkExists/), { error: listingError });
   });
 
   it("registers the n8n callback URL and selected events using the Postora API contract", async () => {
@@ -523,7 +533,7 @@ describe("Postora Trigger — version 3 unified filters", () => {
     };
     const options = await new PostoraTrigger().methods.loadOptions.getAccounts.call(ctx as any);
     expect(options).toEqual([
-      { name: "All accounts", value: "" },
+      { name: "All Accounts", value: "" },
       { name: "965123 (whatsapp)", value: "acc-1" },
     ]);
   });
