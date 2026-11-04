@@ -846,6 +846,20 @@ export class Postora implements INodeType {
             default: "",
             description: "📝 Auto-post a first comment after publishing",
           },
+          {
+            displayName: "Also Share to Story",
+            name: "shareToStory",
+            type: "boolean",
+            default: false,
+            description: "Whether to also publish the first attached image or video as a Story. The Story does not include the post caption or collaborator invitation.",
+          },
+          {
+            displayName: "Collaborator",
+            name: "collaborator",
+            type: "string",
+            default: "",
+            description: "Instagram username to invite as a collaborator on the feed post or reel. A rejected invitation appears as a publishing warning.",
+          },
         ],
       },
       // ── YouTube Additional Options ──
@@ -1631,6 +1645,12 @@ export class Postora implements INodeType {
           }
 
           // Platform-specific metadata
+          if (platform === "instagram" && body.instagram_post_type !== "story") {
+            if (additionalOptions.shareToStory !== undefined) body.instagram_share_to_story = additionalOptions.shareToStory;
+            if (typeof additionalOptions.collaborator === "string" && additionalOptions.collaborator.trim()) {
+              body.instagram_collaborators = [additionalOptions.collaborator.trim()];
+            }
+          }
           if (platform === "youtube") {
             body.youtube_visibility = additionalOptions.youtubeVisibility || "public";
           }

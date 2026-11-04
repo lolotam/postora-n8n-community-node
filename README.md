@@ -22,6 +22,8 @@ Follow the [installation guide](https://docs.n8n.io/integrations/community-nodes
 - **Get Status** — Check the publishing status of a post
 - **List** — List recent posts with optional status filter
 
+For Instagram feed posts and Reels, **Additional Options → Also Share to Story** also publishes the first attached image or video as a Story. The Story does not include the post caption or collaborator invitation. **Additional Options → Collaborator** invites one Instagram username on the feed post or Reel; rejected invitations remain publishing warnings. Both options are optional and standalone Story mode keeps its existing behavior. This requires the Postora create API to support `instagram_share_to_story`; update an installed community node through n8n's Community Nodes settings after the corresponding package is released.
+
 ### Media
 - **Upload** — Upload an image or video file to the Postora media library. Accepts three sources (see [Media → Upload](#media--upload) below):
   - **Binary Property** — a file from a previous n8n node

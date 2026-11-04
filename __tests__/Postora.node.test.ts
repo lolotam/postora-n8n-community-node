@@ -283,6 +283,41 @@ describe("Postora node — Post → Create published URLs", () => {
   });
 });
 
+describe("Postora node — Instagram post and Story options", () => {
+  const params = { resource: "post", operation: "create", platform: "instagram", socialAccounts_instagram: ["instagram-account"],
+    caption: "The same attached image", mediaSource: "url", mediaUrls: "https://example.test/photo.jpg", postType: "feed" };
+
+  it.each(["feed", "reel"].flatMap((postType) => [true, false, undefined].map((shareToStory) => ({ postType, shareToStory }))))("preserves $postType mirror=$shareToStory and its collaborator in one create request", async ({ postType, shareToStory }) => {
+    const { callLog } = await run({ params: { ...params, postType, additionalOptions: { collaborator: " @doctor_one ", ...(shareToStory === undefined ? {} : { shareToStory }) } } });
+    expect(callLog).toHaveLength(1);
+    expect(callLog[0].body).toMatchObject({ platforms: ["instagram"], caption: params.caption, media_urls: [params.mediaUrls],
+      instagram_post_type: postType, instagram_collaborators: ["@doctor_one"] });
+    expect(callLog[0].body.instagram_share_to_story).toBe(shareToStory);
+  });
+
+  it("keeps the original request shape for workflows without the new options", async () => {
+    const { callLog } = await run({ params });
+    expect(callLog).toHaveLength(1);
+    expect(callLog[0].body).toMatchObject({ caption: params.caption, instagram_post_type: "feed", media_urls: [params.mediaUrls] });
+    expect(callLog[0].body).not.toHaveProperty("instagram_share_to_story");
+    expect(callLog[0].body).not.toHaveProperty("instagram_collaborators");
+  });
+
+  it("keeps saved additional options out of a standalone Story", async () => {
+    const { callLog } = await run({ params: { ...params, postType: "story", additionalOptions: { shareToStory: true, collaborator: "doctor_one" } } });
+    expect(callLog[0].body.instagram_media_type).toBe("stories");
+    expect(callLog[0].body).not.toHaveProperty("instagram_share_to_story");
+    expect(callLog[0].body).not.toHaveProperty("instagram_collaborators");
+  });
+
+  it("offers both fields under Instagram feed/reel additional options", () => {
+    const group = new Postora().description.properties.find((property) => property.name === "additionalOptions"
+      && property.displayOptions?.show?.platform?.includes("instagram"));
+    expect(group?.options?.map((option) => option.name)).toEqual(expect.arrayContaining(["shareToStory", "collaborator"]));
+    expect(group?.displayOptions?.hide?.postType).toContain("story");
+  });
+});
+
 describe("Postora node — Media → Upload backward compat (legacy binaryPropertyName)", () => {
   it("uploads from legacy binaryPropertyName when uploadMediaSource is unset", async () => {
     const buf = Buffer.from("hello");
